@@ -73,7 +73,7 @@ def load_data(min_bat_speed=50):
 
 # ── Figure 1: Distributions ───────────────────────────────────────────────────
 
-def plot_distributions(df, out="results/figures/07a_intention_distributions.png"):
+def plot_distributions(df, out="results/figures/intention_distributions.png"):
     fig, axes = plt.subplots(2, 5, figsize=(20, 8))
     fig.suptitle(
         "Posterior Predictions: Intended vs. Realized Swing Shape",
@@ -221,7 +221,7 @@ def _add_n_labels(ax, df, group_col, order):
 
 def plot_zone_heatmaps(
     df,
-    out="results/figures/07c_zone_heatmaps.png",
+    out="results/figures/zone_heatmaps.png",
     n_x=5, n_z=6,
 ):
     """
