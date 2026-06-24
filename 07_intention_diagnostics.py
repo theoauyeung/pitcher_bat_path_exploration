@@ -137,7 +137,7 @@ def plot_count_effects(df, out="results/figures/07b_count_effects.png"):
     metrics = KEY_COUNT_METRICS
     fig, axes = plt.subplots(len(metrics), 2, figsize=(14, 4.2 * len(metrics)))
     fig.suptitle(
-        "Intended Swing Shape by Count (Phase A)",
+        "Intended Swing Shape by Count",
         fontsize=12, fontweight="bold",
     )
 
