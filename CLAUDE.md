@@ -306,6 +306,26 @@ Loads `models/intended_df.parquet` joined with `data/swings_precommit.parquet` t
 
 ---
 
+### `06_kinematic_diagram.py` — Broadcast annotation cards
+
+Produces two-panel figures: a game screenshot (left) with an arrow callout, and a dark metrics panel (right) showing pitch profile, swing shape, and disruption analysis.
+
+**"Proj. → actual" field in the DISRUPTION ANALYSIS section:**
+
+- **Proj.** (`pc{ms}_z_proj_ft × 12`, in inches) — where the ball *would have* crossed the plate if it had continued on the straight-line trajectory visible at commit time (~150 ms before contact). This is what the batter's swing plane is committed to.
+- **Actual** (`plate_z × 12`, in inches) — where the ball actually crossed after all post-commit movement (late break, gravity) accumulated.
+- The gap is `pc_dev_z_in` — the vertical post-commit drop the batter could not react to.
+- `(loc_note)` — e.g. `+2.3" above zone` — shows where the *projected* location was relative to `sz_top`, contextualizing whether the batter's swing was a reach even before the late movement.
+
+Example (Yamamoto splitter): projected 18" off the ground (just below zone), actual 12" — swing plane set 6" too high, entirely due to post-commit drop.
+
+**Callout color convention:** RED = distortion-dominant pitch (movement caused the miss); AMBER = selection-dominant (batter's own decision drove the deviation).
+
+**Inputs:** `data/swings_precommit.parquet`, `results/xrv_causal.parquet`, mlb_db (spin rate + prev pitch)
+**Outputs:** `results/figures/*_annotation.png`
+
+---
+
 ## Key invariants
 
 - `disruption_tax = xRV(realized) − xRV(intended)` where "intended" means all angular deviations = 0. Negative = pitcher cost batter runs.

@@ -117,13 +117,20 @@ Core packages: `bambi`, `pymc`, `statsmodels`, `xgboost`, `pandas`, `numpy`, `ma
 | `07b_count_effects.png` | Mean intended swing shape by count group and (balls × strikes) matrix |
 | `07c_zone_heatmaps.png` | Mean intended shape and deviation across the strike zone |
 
-**Annotated kinematic diagrams** (batter's view, post-commit deviation highlighted):
+**Annotated kinematic diagrams** (`06_kinematic_diagram.py`):
 
-| Pitcher / Batter | Pitch |
-|-----------------|-------|
-| Helsley / Mullins | Sweeper |
-| Leiter / Ramirez | Slider |
-| Sale / Harper | Curveball |
-| Yamamoto / Bernabel | Splitter |
+Each figure is a two-panel broadcast card: game screenshot with arrow callout (left) + dark metrics panel (right). The **DISRUPTION ANALYSIS** section shows:
+
+- **Post-commit drop** — vertical movement after the batter commits (~150 ms pre-contact), in inches
+- **Proj. → actual** — where the ball was projected to cross the plate at commit time vs. where it actually crossed. The projected location is what the batter's swing plane is set for; the gap is what they couldn't react to. The `(loc_note)` tells you whether the projected location was already above/below the zone before late movement.
+- **Disruption tax** — run-value cost of the swing deviation, in runs
+- **Distortion / Selection bar** — proportion of the disruption mechanically caused by movement (red) vs. batter decision (amber)
+
+| Pitcher / Batter | Pitch | Dominant cause |
+|-----------------|-------|----------------|
+| Yamamoto / Bernabel | Splitter | Distortion |
+| Leiter / Ramirez | Curveball | Mixed |
+| Helsley / Mullins | Sweeper | Selection |
+| Sale / Harper | Slider | Selection |
 
 See `results/figures/` for full-resolution PNGs.
