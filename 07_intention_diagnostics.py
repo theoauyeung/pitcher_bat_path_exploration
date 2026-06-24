@@ -44,6 +44,10 @@ LABELS = {
 }
 ANGULAR = ["vert_attack_angle", "horz_attack_angle", "swing_path_tilt"]
 
+# Paper-friendly subsets: strongest count and zone signals
+KEY_COUNT_METRICS = ["vert_attack_angle", "bat_speed"]
+KEY_ZONE_METRICS  = ["vert_attack_angle", "horz_attack_angle"]
+
 COUNT_ORDER  = ["Hitter", "Early", "Full", "Pitcher"]
 COUNT_COLORS = {"Hitter": "#2ca02c", "Early": "#4878d0", "Full": "#ff7f0e", "Pitcher": "#d62728"}
 
@@ -126,34 +130,40 @@ def plot_distributions(df, out="results/figures/07a_intention_distributions.png"
 
 def plot_count_effects(df, out="results/figures/07b_count_effects.png"):
     """
-    Left col: bar chart of mean intended swing shape by count_group.
-    Right col: heatmap of mean deviation from grand mean over (balls × strikes) matrix.
+    Paper-friendly: VAA and bat speed only, wide/short layout.
+    Left col: bar chart of mean intended shape by count_group.
+    Right col: (balls × strikes) heatmap of Δ from grand mean.
     """
-    fig, axes = plt.subplots(len(RESPONSES), 2, figsize=(14, 4.5 * len(RESPONSES)))
+    metrics = KEY_COUNT_METRICS
+    fig, axes = plt.subplots(len(metrics), 2, figsize=(14, 4.2 * len(metrics)))
+    fig.suptitle(
+        "Phase A — Intended Swing Shape by Count",
+        fontsize=12, fontweight="bold",
+    )
 
     df_cg = df.dropna(subset=["count_group"])
     df_cm = df[(df["balls"].between(0, 3)) & (df["strikes"].between(0, 2))].copy()
 
-    for row, resp in enumerate(RESPONSES):
+    for row, resp in enumerate(metrics):
         lbl  = LABELS[resp]
         icol = f"intended_{resp}"
 
         # ── Left: bar by count group ───────────────────────────────────────
         ax = axes[row, 0]
-        grp    = df_cg.groupby("count_group")[icol]
-        means  = grp.mean().reindex(COUNT_ORDER)
-        sds    = grp.std().reindex(COUNT_ORDER)
+        grp   = df_cg.groupby("count_group")[icol]
+        means = grp.mean().reindex(COUNT_ORDER)
+        sds   = grp.std().reindex(COUNT_ORDER)
         colors = [COUNT_COLORS[g] for g in COUNT_ORDER]
 
-        bars = ax.bar(COUNT_ORDER, means, color=colors, alpha=0.85,
+        bars = ax.bar(COUNT_ORDER, means.values, color=colors, alpha=0.85,
                       edgecolor="white", width=0.6)
-        ax.errorbar(COUNT_ORDER, means, yerr=sds, fmt="none",
+        ax.errorbar(COUNT_ORDER, means.values, yerr=sds.values, fmt="none",
                     color="black", capsize=4, lw=1.2)
-        for bar, m in zip(bars, means):
-            ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() * 1.002 + sds[m.name if hasattr(m, 'name') else COUNT_ORDER[list(means).index(m)]] * 0.02,
-                    f"{m:.1f}", ha="center", va="bottom", fontsize=8.5, fontweight="bold")
+        for bar, m, sd in zip(bars, means.values, sds.values):
+            ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + sd * 0.02,
+                    f"{m:.1f}", ha="center", va="bottom", fontsize=9, fontweight="bold")
         ax.set_ylabel(f"Mean {lbl}", fontsize=9)
-        ax.set_title(f"{resp.replace('_', ' ').title()} — Count Group", fontsize=10)
+        ax.set_title(f"{lbl} — Count Group", fontsize=10)
         ax.tick_params(axis="x", labelsize=9)
         _add_n_labels(ax, df_cg, "count_group", COUNT_ORDER)
 
@@ -163,7 +173,13 @@ def plot_count_effects(df, out="results/figures/07b_count_effects.png"):
         pivot = (
             df_cm.groupby(["balls", "strikes"])[icol]
             .mean()
-            .subtract(grand)              # deviation from grand mean
+            .subtract(grand)
+            .unstack("strikes")
+            .reindex(index=[0, 1, 2, 3], columns=[0, 1, 2])
+        )
+        raw_pivot = (
+            df_cm.groupby(["balls", "strikes"])[icol]
+            .mean()
             .unstack("strikes")
             .reindex(index=[0, 1, 2, 3], columns=[0, 1, 2])
         )
@@ -172,26 +188,20 @@ def plot_count_effects(df, out="results/figures/07b_count_effects.png"):
                        vmin=-vabs, vmax=vabs, aspect="auto")
         plt.colorbar(im, ax=ax, shrink=0.85, label=f"Δ vs. grand mean ({lbl})")
 
-        # Cell annotations: raw mean value
-        raw_pivot = (
-            df_cm.groupby(["balls", "strikes"])[icol]
-            .mean()
-            .unstack("strikes")
-            .reindex(index=[0, 1, 2, 3], columns=[0, 1, 2])
-        )
         for bi in range(4):
             for si in range(3):
                 val = raw_pivot.iloc[bi, si]
                 if not np.isnan(val):
+                    txt_col = "white" if abs(pivot.iloc[bi, si]) > vabs * 0.4 else "black"
                     ax.text(si, bi, f"{val:.1f}",
                             ha="center", va="center", fontsize=9, fontweight="bold",
-                            color="white" if abs(pivot.iloc[bi, si]) > vabs * 0.4 else "black")
+                            color=txt_col)
 
         ax.set_xticks([0, 1, 2])
         ax.set_xticklabels(["0 strikes", "1 strike", "2 strikes"], fontsize=9)
         ax.set_yticks([0, 1, 2, 3])
         ax.set_yticklabels(["0 balls", "1 ball", "2 balls", "3 balls"], fontsize=9)
-        ax.set_title(f"{resp.replace('_', ' ').title()} — Δ from mean by Count", fontsize=10)
+        ax.set_title(f"{lbl} — Δ from mean by Count", fontsize=10)
 
     fig.tight_layout()
     fig.savefig(out, dpi=150, bbox_inches="tight")
@@ -214,10 +224,15 @@ def plot_zone_heatmaps(
     out="results/figures/07c_zone_heatmaps.png",
     n_x=5, n_z=6,
 ):
-    """Mean intended swing shape and deviation across the strike zone (angular only)."""
+    """
+    Paper-friendly: VAA and HAA intended only, single-row layout.
+    Shows batter's mechanical adaptation across the strike zone.
+    """
+    metrics = KEY_ZONE_METRICS
+    cmaps   = {"vert_attack_angle": "RdYlGn", "horz_attack_angle": "RdBu_r"}
 
-    x_edges = np.linspace(-1.5,  1.5, n_x + 1)
-    z_edges = np.linspace( 0.5,  4.5, n_z + 1)
+    x_edges = np.linspace(-1.5, 1.5, n_x + 1)
+    z_edges = np.linspace( 0.5, 4.5, n_z + 1)
     x_ctrs  = (x_edges[:-1] + x_edges[1:]) / 2
     z_ctrs  = (z_edges[:-1] + z_edges[1:]) / 2
 
@@ -225,66 +240,51 @@ def plot_zone_heatmaps(
     df["x_bin"] = pd.cut(df["plate_x"], bins=x_edges, labels=False)
     df["z_bin"]  = pd.cut(df["plate_z"], bins=z_edges, labels=False)
 
-    n_resp = len(ANGULAR)
-    fig, axes = plt.subplots(n_resp, 2, figsize=(12, 5.5 * n_resp))
+    fig, axes = plt.subplots(1, len(metrics), figsize=(6 * len(metrics), 5))
     fig.suptitle(
         "Phase A — Intended Swing Shape Across the Strike Zone",
-        fontsize=13, fontweight="bold",
+        fontsize=12, fontweight="bold",
     )
 
     sz_rect_kwargs = dict(linewidth=1.8, edgecolor="white", facecolor="none", zorder=5)
 
-    for row, resp in enumerate(ANGULAR):
+    for col, resp in enumerate(metrics):
+        ax   = axes[col]
         lbl  = LABELS[resp]
         icol = f"intended_{resp}"
-        dcol = f"{resp}_dev"
+        cmap = cmaps.get(resp, "RdYlGn")
 
-        for col, (data_col, cmap, title_sfx, center_zero) in enumerate([
-            (icol, "RdYlGn",  "Intended (mean)",   False),
-            (dcol, "RdBu_r",  "Deviation (mean)",  True),
-        ]):
-            ax = axes[row, col]
-            # pivot: rows = z_bin (0=low), cols = x_bin
-            grid = (
-                df.groupby(["z_bin", "x_bin"])[data_col]
-                .mean()
-                .unstack("x_bin")
-                .reindex(index=range(n_z), columns=range(n_x))
-                .values
-            )
+        grid = (
+            df.groupby(["z_bin", "x_bin"])[icol]
+            .mean()
+            .unstack("x_bin")
+            .reindex(index=range(n_z), columns=range(n_x))
+            .values
+        )
+        vmin, vmax = np.nanmin(grid), np.nanmax(grid)
+        im = ax.imshow(
+            grid, cmap=cmap, vmin=vmin, vmax=vmax,
+            origin="lower",
+            extent=[x_edges[0], x_edges[-1], z_edges[0], z_edges[-1]],
+            aspect="auto",
+        )
+        plt.colorbar(im, ax=ax, shrink=0.8, label=lbl)
 
-            if center_zero:
-                vabs = np.nanpercentile(np.abs(grid), 95)
-                vmin, vmax = -vabs, vabs
-            else:
-                vmin, vmax = np.nanmin(grid), np.nanmax(grid)
+        denom = max(abs(vmin), abs(vmax))
+        for zi, zc in enumerate(z_ctrs):
+            for xi, xc in enumerate(x_ctrs):
+                v = grid[zi, xi]
+                if not np.isnan(v):
+                    txt_color = "white" if abs(v) / denom > 0.55 else "black"
+                    ax.text(xc, zc, f"{v:.1f}", ha="center", va="center",
+                            fontsize=8, color=txt_color)
 
-            im = ax.imshow(
-                grid, cmap=cmap, vmin=vmin, vmax=vmax,
-                origin="lower",
-                extent=[x_edges[0], x_edges[-1], z_edges[0], z_edges[-1]],
-                aspect="auto",
-            )
-            plt.colorbar(im, ax=ax, shrink=0.8, label=lbl)
-
-            # Cell value annotations
-            for zi, zc in enumerate(z_ctrs):
-                for xi, xc in enumerate(x_ctrs):
-                    v = grid[zi, xi]
-                    if not np.isnan(v):
-                        intensity = abs(v) / (vabs if center_zero else max(abs(vmin), abs(vmax)))
-                        txt_color = "white" if intensity > 0.55 else "black"
-                        ax.text(xc, zc, f"{v:.1f}", ha="center", va="center",
-                                fontsize=8, color=txt_color)
-
-            # Strike zone overlay (standard: ±0.83 ft wide, 1.5–3.5 ft tall)
-            ax.add_patch(patches.Rectangle((-0.83, 1.5), 1.66, 2.0, **sz_rect_kwargs))
-
-            ax.set_xlabel("plate_x (ft)  ←arm  |  glove→", fontsize=9)
-            ax.set_ylabel("plate_z (ft)", fontsize=9)
-            ax.set_title(f"{resp.replace('_', ' ').title()} — {title_sfx}", fontsize=10)
-            ax.xaxis.set_major_formatter(ticker.FormatStrFormatter("%.1f"))
-            ax.yaxis.set_major_formatter(ticker.FormatStrFormatter("%.1f"))
+        ax.add_patch(patches.Rectangle((-0.83, 1.5), 1.66, 2.0, **sz_rect_kwargs))
+        ax.set_xlabel("plate_x (ft)  ←arm  |  glove→", fontsize=9)
+        ax.set_ylabel("plate_z (ft)" if col == 0 else "", fontsize=9)
+        ax.set_title(f"{lbl} — Intended", fontsize=10)
+        ax.xaxis.set_major_formatter(ticker.FormatStrFormatter("%.1f"))
+        ax.yaxis.set_major_formatter(ticker.FormatStrFormatter("%.1f"))
 
     fig.tight_layout()
     fig.savefig(out, dpi=150, bbox_inches="tight")
