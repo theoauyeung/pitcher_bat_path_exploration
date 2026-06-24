@@ -14,8 +14,8 @@ import time
 import sys
 from pathlib import Path
 
-POLL_INTERVAL = 2   # seconds between git status checks
-DEBOUNCE_SECS = 5   # seconds of quiet before committing
+POLL_INTERVAL = 2    # seconds between git status checks
+DEBOUNCE_SECS = 30   # seconds of quiet before committing — long enough for plot generation
 
 ROOT = Path(__file__).parent
 
