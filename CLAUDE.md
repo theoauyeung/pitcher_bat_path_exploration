@@ -310,14 +310,20 @@ Loads `models/intended_df.parquet` joined with `data/swings_precommit.parquet` t
 
 Produces two-panel figures: a game screenshot (left) with an arrow callout, and a dark metrics panel (right) showing pitch profile, swing shape, and disruption analysis.
 
-**"Proj. → actual" field in the DISRUPTION ANALYSIS section:**
+**DISRUPTION ANALYSIS panel fields:**
 
-- **Proj.** (`pc{ms}_z_proj_ft × 12`, in inches) — where the ball *would have* crossed the plate if it had continued on the straight-line trajectory visible at commit time (~150 ms before contact). This is what the batter's swing plane is committed to.
-- **Actual** (`plate_z × 12`, in inches) — where the ball actually crossed after all post-commit movement (late break, gravity) accumulated.
-- The gap is `pc_dev_z_in` — the vertical post-commit drop the batter could not react to.
-- `(loc_note)` — e.g. `+2.3" above zone` — shows where the *projected* location was relative to `sz_top`, contextualizing whether the batter's swing was a reach even before the late movement.
+**Post-commit drop** (`pc_dev_z_in`, negative = downward):
+The vertical distance the ball moves after the batter's swing is committed (~150 ms before contact), expressed in inches. This is movement the batter physically cannot react to — the neuromuscular loop is already closed. A splitter dropping 6" post-commit means the batter's swing plane was set 6" too high through no fault of their read. Computed as `pfx_z × (t_commit / t_plate)²` — a quadratic rescaling of total vertical break by the committed fraction of flight time.
 
-Example (Yamamoto splitter): projected 18" off the ground (just below zone), actual 12" — swing plane set 6" too high, entirely due to post-commit drop.
+**Proj. → actual** (`pc_z_proj_ft` → `plate_z`, both in inches):
+- **Proj.** — where the ball would have crossed the plate had it continued on the trajectory visible at commit time. This is the height the batter's brain used to set their swing plane.
+- **Actual** — where the ball actually crossed after post-commit movement accumulated.
+- The gap equals `pc_dev_z_in`. `(loc_note)` shows whether the *projected* location was already above/below the zone top, contextualizing whether the swing was a reach even before the late movement.
+
+Example (Yamamoto splitter): projected 18" off the ground (just below zone), actual 12" — swing plane set 6" too high entirely due to post-commit drop.
+
+**Disruption tax** (`disruption_tax`, in runs, negative = pitcher advantage):
+The run-value cost to the batter from having their swing shape disturbed. Computed as a predict-twice counterfactual: `xRV(realized deviations) − xRV(zero deviations)`. The "intended" counterfactual sets all angular deviations (VAA, HAA, swing path tilt) to 0 and re-evaluates the batter's xRV through the same contact/foul/whiff model. The difference is the total swing-disruption cost, regardless of whether it came from pitch movement or a bad batter read. A disruption tax of −0.04 runs means the batter lost ~40 miliruns on that swing relative to what they'd have gotten with a clean, undisturbed swing.
 
 **Callout color convention:** RED = distortion-dominant pitch (movement caused the miss); AMBER = selection-dominant (batter's own decision drove the deviation).
 

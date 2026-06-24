@@ -121,10 +121,10 @@ Core packages: `bambi`, `pymc`, `statsmodels`, `xgboost`, `pandas`, `numpy`, `ma
 
 Each figure is a two-panel broadcast card: game screenshot with arrow callout (left) + dark metrics panel (right). The **DISRUPTION ANALYSIS** section shows:
 
-- **Post-commit drop** — vertical movement after the batter commits (~150 ms pre-contact), in inches
-- **Proj. → actual** — where the ball was projected to cross the plate at commit time vs. where it actually crossed. The projected location is what the batter's swing plane is set for; the gap is what they couldn't react to. The `(loc_note)` tells you whether the projected location was already above/below the zone before late movement.
-- **Disruption tax** — run-value cost of the swing deviation, in runs
-- **Distortion / Selection bar** — proportion of the disruption mechanically caused by movement (red) vs. batter decision (amber)
+- **Post-commit drop** — vertical inches the ball moves after the batter commits (~150 ms pre-contact). This is movement the batter cannot react to; a splitter dropping 6" post-commit means the swing plane was set 6" too high through no fault of their read.
+- **Proj. → actual** — the ball's projected plate-crossing height (what the batter's brain used to set swing plane) vs. its actual height after late movement. The parenthetical shows whether the *projected* location was already above or below the zone before any late break. The gap between the two numbers equals the post-commit drop.
+- **Disruption tax** — run-value cost of the swing deviation, in runs (negative = pitcher advantage). Computed by predicting the batter's xRV twice — once with the actual swing deviations, once with all deviations zeroed — and taking the difference.
+- **Distortion / Selection bar** — what fraction of the disruption was mechanically caused by post-commit pitch movement (distortion, red) vs. the batter's own decision (selection, amber).
 
 | Pitcher / Batter | Pitch | Dominant cause |
 |-----------------|-------|----------------|
