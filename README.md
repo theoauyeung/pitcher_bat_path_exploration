@@ -1,12 +1,14 @@
 # Pitcher Bat-Path Exploration
 
-Causal mediation analysis of how post-commit pitch movement disrupts batter swing shape and costs run value. Developed at Driveline Baseball.
+Causal mediation analysis of how post-commit pitch movement disrupts batter swing shape and costs run value. 
 
 ---
 
 ## What this does
 
-A batter commits to their swing before the ball reaches them. Any pitch movement that happens *after* that commitment point is invisible to the batter's decision — they can't select against it. This project exploits that timing asymmetry to decompose per-swing run-value loss into two causal channels:
+The purpose of this research is to explore to what extent pitchers distort batter swing shapes - how much run value does a pitcher generate by forcing a batter into a worse swing shape than the pitch that was delivered warranted. How much of the run-value cost of pitch-induced swing deviation can be attributed to that late, unactionable movement - and how much would have occurred regardless, simply because the batter chose to swing.
+
+ This project exploits that timing asymmetry to decompose per-swing run-value loss into two causal channels:
 
 - **Distortion** — swing deviation mechanically caused by post-commit pitch movement
 - **Selection** — swing deviation attributable to the batter's own decision (e.g., misjudging pitch type, late recognition)
@@ -55,7 +57,7 @@ python 07_intention_diagnostics.py # Phase A model diagnostics (distributions, c
 
 ## Architecture
 
-### Phase A — Batter intended swing (`02_intention_model.py`)
+###  Batter intended swing (`02_intention_model.py`)
 
 Fits a Bayesian linear mixed-effects model (Bambi/PyMC, ADVI) per swing-shape response:
 
@@ -65,7 +67,7 @@ Fits a Bayesian linear mixed-effects model (Bambi/PyMC, ADVI) per swing-shape re
 
 The residual `realized − predicted` is the swing-shape deviation used as the Phase B mediator.
 
-### Phase B — Run-value mediation (`03_causal_models.py`)
+### Run-value mediation (`03_causal_models.py`)
 
 Three outcome channels:
 - **P(BIP)** — logistic contact model
@@ -118,6 +120,9 @@ Core packages: `bambi`, `pymc`, `statsmodels`, `xgboost`, `pandas`, `numpy`, `ma
 | `07c_zone_heatmaps.png` | Mean intended shape and deviation across the strike zone |
 
 **Annotated kinematic diagrams** (`06_kinematic_diagram.py`):
+
+Pulled from the following videos: (https://baseballsavant.mlb.com/sporty-videos?playId=fe30b4fe-120e-4f6c-a258-a624bc52452f, 
+https://baseballsavant.mlb.com/sporty-videos?playId=84f68d2c-ea0d-351c-b752-2d4aec739924, https://baseballsavant.mlb.com/sporty-videos?playId=cf50242d-6c5b-30f4-a051-300f33655ef9, https://baseballsavant.mlb.com/sporty-videos?playId=39e968ef-398c-3112-8856-75799afc21df)
 
 Each figure is a two-panel broadcast card: game screenshot with arrow callout (left) + dark metrics panel (right). The **DISRUPTION ANALYSIS** section shows:
 
