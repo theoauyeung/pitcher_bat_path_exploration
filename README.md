@@ -1,0 +1,120 @@
+# Pitcher Bat-Path Exploration
+
+Causal mediation analysis of how post-commit pitch movement disrupts batter swing shape and costs run value. Developed at Driveline Baseball.
+
+---
+
+## What this does
+
+A batter commits to their swing before the ball reaches them. Any pitch movement that happens *after* that commitment point is invisible to the batter's decision — they can't select against it. This project exploits that timing asymmetry to decompose per-swing run-value loss into two causal channels:
+
+- **Distortion** — swing deviation mechanically caused by post-commit pitch movement
+- **Selection** — swing deviation attributable to the batter's own decision (e.g., misjudging pitch type, late recognition)
+
+The causal chain is:
+
+```
+post-commit movement  →  swing-shape deviation  →  run value
+    (treatment)              (mediator)             (outcome)
+```
+
+---
+
+## Pipeline
+
+Run scripts in order:
+
+```bash
+python 00_pull_data.py          # pull MLB pitch-by-pitch data from mlb_db → data/
+python 01_precommit_split.py    # compute pre/post-commit trajectory split → data/swings_precommit.parquet
+python 02_intention_model.py    # Phase A: fit batter intended-swing LMMs → models/
+python 03_causal_models.py      # Phase B: fit mediation + outcome models → models/
+python 04_run_pipeline.py       # orchestrate Phase A → B → results/xrv_causal.parquet
+```
+
+Visualization (optional, after pipeline):
+
+```bash
+python 05_trajectory_plot.py    # pitch trajectory plots with pre/post-commit split
+python 06_kinematic_diagram.py  # annotated batter-view kinematic diagrams
+```
+
+---
+
+## Key outputs
+
+| File | Contents |
+|------|----------|
+| `results/xrv_causal.parquet` | Per-swing disruption / distortion / selection tax |
+| `results/distortion_pitcher.csv` | Pitcher-level distortion leaderboard (≥50 swings) |
+| `results/distortion_batter.csv` | Batter-level disruption leaderboard (≥50 swings) |
+| `results/figures/` | Annotated kinematic diagrams and trajectory plots |
+
+---
+
+## Architecture
+
+### Phase A — Batter intended swing (`02_intention_model.py`)
+
+Fits a Bayesian linear mixed-effects model (Bambi/PyMC, ADVI) per swing-shape response:
+
+- **Responses:** `vert_attack_angle`, `horz_attack_angle`, `swing_path_tilt`, `bat_speed`, `swing_length`
+- **Fixed effects:** pitch location (`plate_x`, `plate_z`), count, timing (`offset_y_ms`), platoon handedness
+- **Random effects:** per-batter intercept + count-pressure slope; per-pitcher intercept (excluded from counterfactual predictions)
+
+The residual `realized − predicted` is the swing-shape deviation used as the Phase B mediator.
+
+### Phase B — Run-value mediation (`03_causal_models.py`)
+
+Three outcome channels:
+- **P(BIP)** — logistic contact model
+- **P(foul | not BIP)** — logistic foul model (separate from whiff at 2 strikes)
+- **E[xwOBAcon | BIP]** — OLS on balls in play
+
+Composite expected run value:
+```
+xRV = P(BIP)·E[xwOBA|BIP] + P(foul)·foul_rv[count] + P(whiff)·whiff_rv[count]
+```
+
+Disruption tax = `xRV(realized) − xRV(intended at zero deviation)`.
+
+Distortion share uses squared-norm decomposition:
+```
+distortion_share = ‖distortion_dev‖² / ‖total_dev‖²
+```
+
+---
+
+## Data
+
+Source: `mlb_db` (internal Driveline MySQL), MLB regular-season 2023–2025. Requires internal network access.
+
+Large data files (`data/`, `models/*.joblib`, `results/*.parquet` > 25 MB) are not tracked in this repo. Re-generate by running the pipeline.
+
+---
+
+## Dependencies
+
+Managed via `.venv` (project-local):
+
+```bash
+python -m venv .venv
+.venv\Scripts\pip install -r requirements.txt   # Windows
+```
+
+Core packages: `bambi`, `pymc`, `statsmodels`, `xgboost`, `pandas`, `numpy`, `matplotlib`, `sqlalchemy`, `pymysql`.
+
+---
+
+## Figures
+
+Sample annotated kinematic diagrams (batter's view, post-commit deviation highlighted):
+
+| Pitcher / Batter | Pitch |
+|-----------------|-------|
+| Helsley / Mullins | Sweeper |
+| Leiter / Ramirez | Slider |
+| Sale / Harper | Curveball |
+| Yamamoto / Bernabel | Splitter |
+
+See `results/figures/` for full-resolution PNGs.

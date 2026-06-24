@@ -1,0 +1,33 @@
+# Large data files
+data/
+
+# Large model binaries
+models/
+
+# Videos
+videos/
+
+# Large computed result files (recompute via pipeline)
+results/swing_xrv.csv
+results/swing_xrv.parquet
+results/xrv_causal.csv
+results/xrv_causal.parquet
+results/xrv_realized.csv
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+
+# Internal Claude tooling
+.claude/
+.planning/
+
+# Experiments
+experiments/
+
+# Scripts not part of main numbered pipeline
+_make_notebooks.py
+run_values.py
+show_env.py
