@@ -43,11 +43,17 @@ def _commit():
     msg = f"auto: {label}"
 
     result = _git("commit", "-m", msg)
-    if result.returncode == 0:
-        short = _git("rev-parse", "--short", "HEAD").stdout.strip()
-        print(f"  [{short}] {msg}")
-    else:
+    if result.returncode != 0:
         print(f"  commit failed: {result.stderr.strip()}", file=sys.stderr)
+        return
+
+    short = _git("rev-parse", "--short", "HEAD").stdout.strip()
+    print(f"  [{short}] {msg} — pushing...", end="", flush=True)
+    push = _git("push", "origin", "HEAD")
+    if push.returncode == 0:
+        print(" done.")
+    else:
+        print(f" push failed: {push.stderr.strip()}", file=sys.stderr)
 
 
 def main():
