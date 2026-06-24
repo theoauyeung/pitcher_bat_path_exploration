@@ -131,9 +131,10 @@ Each response gets its own Bambi/PyMC Gaussian LMM (separate fits, not a joint m
 **Model formula (angular responses):**
 ```
 {resp} ~ scale(balls) + scale(strikes)
-       + scale(plate_x_bat) + scale(plate_z) + scale(plate_z_sq)
+       + scale(x_proj_bat) + x_proj_missing
+       + scale(z_proj) + scale(z_proj_sq)
        + scale(offset_y_ms) + offset_y_ms_missing
-       + pitcher_throws_L + pitcher_throws_L:scale(plate_x_bat)
+       + pitcher_throws_L + pitcher_throws_L:scale(x_proj_bat)
        + (1 + scale(strikes) | batter_id)
        + (1 | pitcher_id)
 ```
@@ -141,7 +142,7 @@ Each response gets its own Bambi/PyMC Gaussian LMM (separate fits, not a joint m
 **Model formula (effort responses):**
 ```
 {resp} ~ scale(balls) + scale(strikes)
-       + scale(plate_x_bat) + scale(plate_z)
+       + scale(x_proj_bat) + scale(z_proj)
        + pitcher_throws_L
        + (1 + scale(strikes) | batter_id)
        + (1 | pitcher_id)
@@ -149,12 +150,13 @@ Each response gets its own Bambi/PyMC Gaussian LMM (separate fits, not a joint m
 
 **What each term does and why it's there:**
 
-- `plate_x_bat`: location in batter's own frame — `plate_x × {−1 for RHB, +1 for LHB}` so inside is positive for both hands. Captures the mechanical effect of pitch location on swing shape.
-- `plate_z_sq`: quadratic smooth on height — batters mechanically tilt their swing to match the pitch plane; under-modeling height mislabels appropriate plane adaptation as execution error, which contaminates the mediator.
+- `x_proj_bat`: projected plate crossing at commit time (pc150_x_proj) in batter's own frame — `x_proj × {−1 for RHB, +1 for LHB}`. Uses the projected location rather than `plate_x` because `plate_x = x_proj + dev_x`; conditioning on `plate_x` would encode post-commit movement into the intention baseline, partially canceling it out of the mediator and attenuating the distortion estimate. Commit time fixed at 150 ms (`COMMIT_MS` module constant).
+- `x_proj_missing` indicator: trajectory reconstruction fails for ~2–4% of rows; mean-imputed with this indicator absorbing the systematic shift.
+- `z_proj` / `z_proj_sq`: quadratic smooth on projected height (pc150_z_proj) — batters mechanically tilt their swing to match the pitch plane; under-modeling height mislabels appropriate plane adaptation as execution error, which contaminates the mediator.
 - `offset_y_ms`: timing axis (early/on-time/late in ms) — attack angle at contact depends on where in the swing arc the bat was sampled; conditioning on timing removes the Powers-Yurko arc-sampling artifact from the deviation residual.
 - `offset_y_ms_missing` indicator + mean imputation: missingness is systematic (correlated with whiff rate and contact quality), not MCAR. The indicator absorbs the average shift for missing rows; the timing coefficient is identified only from observed rows.
 - `pitcher_throws_L`: absorbs spin-direction reversal across platoon matchups. Left-handed pitchers' breaking balls break the opposite horizontal direction, creating a mechanical location effect that is not a batter intention signal.
-- `pitcher_throws_L:scale(plate_x_bat)`: interaction — the platoon-handedness effect is not uniform across location; a left-hander's ball to an inside corner on an RHB looks like a breaking ball to the outside corner of an LHB.
+- `pitcher_throws_L:scale(x_proj_bat)`: interaction — the platoon-handedness effect is not uniform across location; a left-hander's ball to an inside corner on an RHB looks like a breaking ball to the outside corner of an LHB.
 - `(1 + scale(strikes) | batter_id)`: per-batter intercept + count-pressure slope. The strikes slope captures how each batter adjusts their swing as the count worsens — this is the core "intention" signal.
 - `(1 | pitcher_id)`: partial out mound quality from the intention baseline. Excluded from predictions — the counterfactual intended swing is what the batter would do against a neutral pitcher.
 
@@ -170,7 +172,7 @@ Each response gets its own Bambi/PyMC Gaussian LMM (separate fits, not a joint m
 - `angular_mahal` — Mahalanobis distance in joint 3D angular deviation space using the empirical residual covariance matrix
 
 **Considered but rejected:**
-- Per-batter random slopes on `plate_x_bat` and `plate_z`: creates a 4×4 LKJ correlation prior that causes degenerate NUTS geometry (max_treedepth warnings, R-hat > 1.01 for tail batters regardless of tuning steps). Confirmed across autoresearch experiments. Location effects stay as fixed effects only.
+- Per-batter random slopes on `x_proj_bat` and `z_proj`: creates a 4×4 LKJ correlation prior that causes degenerate NUTS geometry (max_treedepth warnings, R-hat > 1.01 for tail batters regardless of tuning steps). Confirmed across autoresearch experiments. Location effects stay as fixed effects only.
 - True joint `mvbind` fit with correlated batter RE across all 5 responses (the original plan in proj_desc §8, which requires `brms`/Stan): approximated with separate Bambi fits + empirical residual covariance for the Mahalanobis metric. The only material concession vs. brms is that the joint batter RE covariance structure is recovered post-hoc rather than jointly identified.
 - Skew-normal family for `bat_speed` and `swing_length` (proj_desc §8 specifies this to handle hold-back asymmetry): Bambi 0.18 lacks skewnormal; Gaussian used for all responses.
 - `n_subsample=None` (full dataset): the `(1 | pitcher_id)` term causes Bambi's `formulae` backend to allocate a dense `(n_rows × n_pitchers)` contrast matrix that OOMs at ~4.9 GB on the full dataset. Default is 75k rows.
@@ -178,7 +180,7 @@ Each response gets its own Bambi/PyMC Gaussian LMM (separate fits, not a joint m
 
 ### Phase A MCMC known issues
 
-- **Batter random slopes must be intercept + strikes only.** Adding `plate_x_bat` or `plate_z` to the random effects creates a 4×4 LKJ correlation prior with degenerate NUTS geometry.
+- **Batter random slopes must be intercept + strikes only.** Adding `x_proj_bat` or `z_proj` to the random effects creates a 4×4 LKJ correlation prior with degenerate NUTS geometry.
 - **Use `n_subsample=75_000` (the default).** The full dataset OOMs the pitcher_id contrast matrix at ~4.9 GB. Use `n_subsample=None` only with ≥16 GB RAM free.
 - R-hat > 1.01 for some tail batters is expected with MCMC on this model — not a bug. `tune=1000, max_treedepth=15` are the minimum viable settings.
 
