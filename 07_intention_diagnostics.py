@@ -1,5 +1,5 @@
 """
-07_intention_diagnostics.py
+07_intention_diagnostics.py  # demo edit
 Phase A intention model diagnostic visualizations.
 
 Three figures:
@@ -76,7 +76,7 @@ def load_data(min_bat_speed=50):
 def plot_distributions(df, out="results/figures/07a_intention_distributions.png"):
     fig, axes = plt.subplots(2, 5, figsize=(20, 8))
     fig.suptitle(
-        "Phase A — Posterior Predictions: Intended vs. Realized Swing Shape",
+        "Posterior Predictions: Intended vs. Realized Swing Shape",
         fontsize=13, fontweight="bold", y=1.01,
     )
 
@@ -137,7 +137,7 @@ def plot_count_effects(df, out="results/figures/07b_count_effects.png"):
     metrics = KEY_COUNT_METRICS
     fig, axes = plt.subplots(len(metrics), 2, figsize=(14, 4.2 * len(metrics)))
     fig.suptitle(
-        "Phase A — Intended Swing Shape by Count",
+        "Intended Swing Shape by Count",
         fontsize=12, fontweight="bold",
     )
 
@@ -242,7 +242,7 @@ def plot_zone_heatmaps(
 
     fig, axes = plt.subplots(1, len(metrics), figsize=(6 * len(metrics), 5))
     fig.suptitle(
-        "Phase A — Intended Swing Shape Across the Strike Zone",
+        "Intended Swing Shape Across the Strike Zone",
         fontsize=12, fontweight="bold",
     )
 
