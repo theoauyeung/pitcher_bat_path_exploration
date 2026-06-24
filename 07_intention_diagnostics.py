@@ -1,6 +1,6 @@
 """
 07_intention_diagnostics.py
-Phase A intention model diagnostic visualizations.
+Intention model diagnostic visualizations.
 
 Three figures:
   07a — Distributions: intended vs realized per response + deviation histograms
