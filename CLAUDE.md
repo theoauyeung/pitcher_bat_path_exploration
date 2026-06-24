@@ -167,11 +167,10 @@ Each response gets its own Bambi/PyMC Gaussian LMM (separate fits, not a joint m
 **Outputs per swing:**
 - `intended_{metric}` — posterior-mean predicted swing shape (the intention baseline)
 - `{metric}_dev` — `realized − intended` (the Phase B mediator)
-- `angular_mahal` — Mahalanobis distance in joint 3D angular deviation space using the empirical residual covariance matrix
 
 **Considered but rejected:**
 - Per-batter random slopes on `plate_x_bat` and `plate_z`: creates a 4×4 LKJ correlation prior that causes degenerate NUTS geometry (max_treedepth warnings, R-hat > 1.01 for tail batters regardless of tuning steps). Confirmed across autoresearch experiments. Location effects stay as fixed effects only.
-- True joint `mvbind` fit with correlated batter RE across all 5 responses (the original plan in proj_desc §8, which requires `brms`/Stan): approximated with separate Bambi fits + empirical residual covariance for the Mahalanobis metric. The only material concession vs. brms is that the joint batter RE covariance structure is recovered post-hoc rather than jointly identified.
+- True joint `mvbind` fit with correlated batter RE across all 5 responses (the original plan in proj_desc §8, which requires `brms`/Stan): approximated with separate Bambi fits. The only material concession vs. brms is that the joint batter RE covariance structure is recovered post-hoc rather than jointly identified.
 - Skew-normal family for `bat_speed` and `swing_length` (proj_desc §8 specifies this to handle hold-back asymmetry): Bambi 0.18 lacks skewnormal; Gaussian used for all responses.
 - `n_subsample=None` (full dataset): the `(1 | pitcher_id)` term causes Bambi's `formulae` backend to allocate a dense `(n_rows × n_pitchers)` contrast matrix that OOMs at ~4.9 GB on the full dataset. Default is 75k rows.
 - Adding `velo_delta`, `prev_pitch_type` sequence features to the intention formula — considered for count_group conditioning; dropped because sequence context is a pitch-selection predictor, not an intention-of-swing predictor
@@ -282,6 +281,28 @@ Runs Phase A → Phase B in sequence. Key behaviors:
 - Foul at (b, 2): `delta = 0` — count stays, PA continues
 
 **`xwoba` assignment:** Hit outcomes checked in descending order of value (`HR → 3B → 2B → 1B → out_in_play`) to handle any double-coding edge cases in source data.
+
+---
+
+### `07_intention_diagnostics.py` — Phase A diagnostic visualizations
+
+Loads `models/intended_df.parquet` joined with `data/swings_precommit.parquet` to produce three diagnostic figures. Requires both files to exist (run `04_run_pipeline.py` first).
+
+**Figure 07a — Distributions:**
+- Row 1: intended vs. realized histograms per response (5 panels). Intended distribution should be narrower/smoother than realized — the model's location/count conditioning removes structured variation.
+- Row 2: deviation (`realized − intended`) per response. Should be centered near 0; nonzero mean indicates systematic model bias for that response.
+
+**Figure 07b — Count effects:**
+- Left: mean intended swing shape by `count_group` (Hitter/Early/Full/Pitcher) with ±1 SD error bars.
+- Right: (balls × strikes) heatmap showing each cell's deviation from the grand mean. Expected pattern: VAA drops ~1° per strike (more defensive), bat speed drops in pitcher counts.
+
+**Figure 07c — Zone heatmaps (angular responses only):**
+- Left col: mean intended value per zone cell. Expected: VAA higher for low pitches (mechanical plane adaptation), HAA gradient arm→glove side.
+- Right col: mean deviation per zone cell. Should be near-zero everywhere — systematic residuals by zone indicate the location fixed effects are under-specified.
+- Strike zone overlay drawn at ±0.83 ft × [1.5, 3.5] ft.
+
+**Inputs:** `data/swings_precommit.parquet`, `models/intended_df.parquet`
+**Outputs:** `results/figures/07a_intention_distributions.png`, `07b_count_effects.png`, `07c_zone_heatmaps.png`
 
 ---
 

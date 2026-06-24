@@ -35,8 +35,9 @@ python 04_run_pipeline.py       # orchestrate Phase A → B → results/xrv_caus
 Visualization (optional, after pipeline):
 
 ```bash
-python 05_trajectory_plot.py    # pitch trajectory plots with pre/post-commit split
-python 06_kinematic_diagram.py  # annotated batter-view kinematic diagrams
+python 05_trajectory_plot.py       # pitch trajectory plots with pre/post-commit split
+python 06_kinematic_diagram.py     # annotated batter-view kinematic diagrams
+python 07_intention_diagnostics.py # Phase A model diagnostics (distributions, count/zone effects)
 ```
 
 ---
@@ -48,7 +49,7 @@ python 06_kinematic_diagram.py  # annotated batter-view kinematic diagrams
 | `results/xrv_causal.parquet` | Per-swing disruption / distortion / selection tax |
 | `results/distortion_pitcher.csv` | Pitcher-level distortion leaderboard (≥50 swings) |
 | `results/distortion_batter.csv` | Batter-level disruption leaderboard (≥50 swings) |
-| `results/figures/` | Annotated kinematic diagrams and trajectory plots |
+| `results/figures/` | Kinematic diagrams, trajectory plots, and intention model diagnostics |
 
 ---
 
@@ -108,7 +109,15 @@ Core packages: `bambi`, `pymc`, `statsmodels`, `xgboost`, `pandas`, `numpy`, `ma
 
 ## Figures
 
-Sample annotated kinematic diagrams (batter's view, post-commit deviation highlighted):
+**Intention model diagnostics** (`07_intention_diagnostics.py`):
+
+| Figure | Contents |
+|--------|----------|
+| `07a_intention_distributions.png` | Intended vs. realized distributions + deviation histograms per response |
+| `07b_count_effects.png` | Mean intended swing shape by count group and (balls × strikes) matrix |
+| `07c_zone_heatmaps.png` | Mean intended shape and deviation across the strike zone |
+
+**Annotated kinematic diagrams** (batter's view, post-commit deviation highlighted):
 
 | Pitcher / Batter | Pitch |
 |-----------------|-------|

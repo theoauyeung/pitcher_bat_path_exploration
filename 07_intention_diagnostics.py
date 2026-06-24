@@ -130,7 +130,6 @@ def plot_count_effects(df, out="results/figures/07b_count_effects.png"):
     Right col: heatmap of mean deviation from grand mean over (balls × strikes) matrix.
     """
     fig, axes = plt.subplots(len(RESPONSES), 2, figsize=(14, 4.5 * len(RESPONSES)))
-    fig.suptitle("Phase A — Intended Swing Shape by Count", fontsize=13, fontweight="bold")
 
     df_cg = df.dropna(subset=["count_group"])
     df_cm = df[(df["balls"].between(0, 3)) & (df["strikes"].between(0, 2))].copy()
