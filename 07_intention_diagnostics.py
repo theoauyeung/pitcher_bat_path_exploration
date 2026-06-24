@@ -1,5 +1,5 @@
 """
-07_intention_diagnostics.py  # demo edit
+07_intention_diagnostics.py
 Phase A intention model diagnostic visualizations.
 
 Three figures:
