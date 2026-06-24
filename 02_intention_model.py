@@ -16,20 +16,15 @@ Powers-Yurko skeleton extended per proj_desc.md §8:
 
   Population predictors (angular):
     count (balls, strikes)
-    x_proj_bat   — projected plate crossing at commit time (150 ms) in the batter's frame;
-                   uses pc150_x_proj; mean-imputed with missing indicator for rows where
-                   trajectory reconstruction failed. Using the projected location (not
-                   plate_x) ensures the intention baseline is formed from what the batter
-                   could observe — plate_x = x_proj + dev_x, so conditioning on plate_x
-                   would encode post-commit movement into the baseline and attenuate the
-                   distortion estimate.
-    z_proj, z_proj²  — quadratic smooth on projected height (pc150_z_proj); mean-imputed
+    plate_x_bat  — location in the batter's frame (inside is positive for both hands)
+    plate_z, plate_z²  — quadratic smooth on height; batters tilt to match pitch plane,
+                          under-modeling height mislabels appropriate adaptation as error
     offset_y_ms  — timing (early/on-time/late); removes arc-sampling artifact from deviation
 
   Population predictors (effort):
-    count, x_proj_bat, z_proj (no quadratic, no timing — location is a minor modifier)
+    count, plate_x_bat, plate_z (no quadratic, no timing — location is a minor modifier)
 
-  Batter RE: intercept + slopes on strikes  (one per response)
+  Batter RE: intercept + slopes on strikes + plate_x_bat + plate_z  (one per response)
   Pitcher RE: intercept only (partials mound quality out of the intention baseline)
 
 True joint mvbind fit (correlated batter RE across responses) requires brms. Python
@@ -61,9 +56,9 @@ ALL_RESPONSES = ANGULAR + EFFORT
 # ── Model formulas ─────────────────────────────────────────────────────────────
 
 def _angular_formula(resp):
-    """Quadratic smooth on z_proj + timing for the three angular mediators.
+    """Quadratic smooth on plate_z + timing for the three angular mediators.
 
-    Batter RE is intercept + strikes only. Including x_proj_bat/z_proj in the
+    Batter RE is intercept + strikes only. Including plate_x_bat/plate_z in the
     random slopes creates a 4×4 LKJ prior that makes NUTS degenerate (max_treedepth
     warnings, R-hat > 1.01 for tail batters regardless of tuning). Location effects
     are captured by the fixed effects; the random slope captures per-batter count
@@ -71,20 +66,19 @@ def _angular_formula(resp):
     """
     return (
         f"{resp} ~ scale(balls) + scale(strikes)"
-        " + scale(x_proj_bat) + x_proj_missing"
-        " + scale(z_proj) + scale(z_proj_sq)"
+        " + scale(plate_x_bat) + scale(plate_z) + scale(plate_z_sq)"
         " + scale(offset_y_ms) + offset_y_ms_missing"
-        " + pitcher_throws_L + pitcher_throws_L:scale(x_proj_bat)"
+        " + pitcher_throws_L + pitcher_throws_L:scale(plate_x_bat)"
         " + (1 + scale(strikes) | batter_id)"
         " + (1 | pitcher_id)"
     )
 
 
 def _effort_formula(resp):
-    """Simpler formula for bat speed and swing length; no quadratic, timing, or missing indicator."""
+    """Simpler formula for bat speed and swing length; no quadratic or timing."""
     return (
         f"{resp} ~ scale(balls) + scale(strikes)"
-        " + scale(x_proj_bat) + scale(z_proj)"
+        " + scale(plate_x_bat) + scale(plate_z)"
         " + pitcher_throws_L"
         " + (1 + scale(strikes) | batter_id)"
         " + (1 | pitcher_id)"
@@ -93,33 +87,23 @@ def _effort_formula(resp):
 
 # ── Data preparation ───────────────────────────────────────────────────────────
 
-COMMIT_MS = 150  # commit time used for projected location columns
-
 def _prep(df, n_subsample=None, seed=345):
     """Filter to valid tracked swings and build derived columns."""
     need = list(ALL_RESPONSES) + [
-        "balls", "strikes", f"pc{COMMIT_MS}_x_proj", f"pc{COMMIT_MS}_z_proj",
+        "balls", "strikes", "plate_x", "plate_z",
         "batter_stand", "batter_id", "pitcher_id",
         "offset_y_ms", "pitcher_throws",
     ]
-    # Drop on everything except timing and projected location — both are imputed below.
-    drop_on = list(ALL_RESPONSES) + ["balls", "strikes",
+    # Drop rows with NaN in any formula variable except offset_y_ms (imputed below).
+    drop_on = list(ALL_RESPONSES) + ["balls", "strikes", "plate_x", "plate_z",
                                       "batter_stand", "batter_id", "pitcher_id",
                                       "pitcher_throws"]
     d = df.loc[df["is_swing"].astype(bool), need].dropna(subset=drop_on).copy()
     d = d[d["bat_speed"] > 0]
 
-    # projected location in batter's frame: inside is positive for both hands.
-    # Missing rows (~2-4% with bad trajectory reconstruction) get mean-imputed
-    # with x_proj_missing absorbing the systematic shift.
-    d["x_proj_missing"] = d[f"pc{COMMIT_MS}_x_proj"].isna().astype(float)
-    x_proj_mean = float(d[f"pc{COMMIT_MS}_x_proj"].mean())
-    z_proj_mean = float(d[f"pc{COMMIT_MS}_z_proj"].mean())
-    d[f"pc{COMMIT_MS}_x_proj"] = d[f"pc{COMMIT_MS}_x_proj"].fillna(x_proj_mean)
-    d[f"pc{COMMIT_MS}_z_proj"] = d[f"pc{COMMIT_MS}_z_proj"].fillna(z_proj_mean)
-    d["x_proj_bat"] = d[f"pc{COMMIT_MS}_x_proj"] * d["batter_stand"].map({"R": -1.0, "L": 1.0})
-    d["z_proj"] = d[f"pc{COMMIT_MS}_z_proj"]
-    d["z_proj_sq"] = d["z_proj"] ** 2
+    # location in batter's frame: inside is positive for both hands
+    d["plate_x_bat"] = d["plate_x"] * d["batter_stand"].map({"R": -1.0, "L": 1.0})
+    d["plate_z_sq"] = d["plate_z"] ** 2
     # pitcher handedness: absorbs spin-direction reversal across platoon matchups
     d["pitcher_throws_L"] = (d["pitcher_throws"] == "L").astype(float)
 
@@ -281,24 +265,12 @@ def predict_intended(result, swings):
 
     scoring = swings.copy()
 
-    if "x_proj_bat" not in scoring.columns:
-        x_proj_col = f"pc{COMMIT_MS}_x_proj"
-        x_proj_src = (scoring[x_proj_col] if x_proj_col in scoring.columns
-                      else pd.Series(np.nan, index=scoring.index))
-        x_proj_mean = float(d_train[x_proj_col].mean())
-        scoring["x_proj_missing"] = x_proj_src.isna().astype(float)
-        x_proj_filled = x_proj_src.fillna(x_proj_mean)
-        stand = (scoring["batter_stand"] if "batter_stand" in scoring.columns
-                 else pd.Series("R", index=scoring.index))
-        scoring["x_proj_bat"] = x_proj_filled * stand.map({"R": -1.0, "L": 1.0})
+    if "plate_x_bat" not in scoring.columns:
+        stand = scoring.get("batter_stand", pd.Series("R", index=scoring.index))
+        scoring["plate_x_bat"] = scoring["plate_x"] * stand.map({"R": -1.0, "L": 1.0})
 
-    if "z_proj" not in scoring.columns:
-        z_proj_col = f"pc{COMMIT_MS}_z_proj"
-        z_proj_src = (scoring[z_proj_col] if z_proj_col in scoring.columns
-                      else pd.Series(np.nan, index=scoring.index))
-        z_proj_mean = float(d_train[z_proj_col].mean())
-        scoring["z_proj"] = z_proj_src.fillna(z_proj_mean)
-        scoring["z_proj_sq"] = scoring["z_proj"] ** 2
+    if "plate_z_sq" not in scoring.columns:
+        scoring["plate_z_sq"] = scoring["plate_z"] ** 2
 
     if "pitcher_throws_L" not in scoring.columns:
         if "pitcher_throws" in scoring.columns:
