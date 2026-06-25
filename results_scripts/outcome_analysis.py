@@ -1,14 +1,16 @@
 """
 outcome_analysis.py
-Distortion / selection tax broken down by swing outcome, and their
-relationship with contact quality (xwOBA).
+How swing outcomes shift as distortion / selection tax increases.
+
+The disruption tax = xRV(realized) - xRV(intended). To interpret correctly,
+we bin swings BY tax level and ask: what outcomes does high distortion produce?
 
 Run from project root:
     .venv\\Scripts\\python.exe results_scripts\\outcome_analysis.py
 
 Outputs:
-    results/figures/outcome_table.png      -- mean taxes by outcome category
-    results/figures/xwoba_relationship.png -- xwOBA vs tax metrics (BIP only)
+    results/figures/outcome_rates.png      -- outcome rates by tax quintile
+    results/figures/xwoba_relationship.png -- xwOBA on contact vs tax metrics
 """
 
 import numpy as np
@@ -36,9 +38,18 @@ df = (
     .dropna(subset=["distortion_tax", "selection_tax", "disruption_tax"])
 )
 
-df["is_foul"] = (df["is_contact"] == 1) & (df["is_bip"] == 0)
+df["is_foul"]       = (df["is_contact"] == 1) & (df["is_bip"] == 0)
+df["is_out_in_play"] = (
+    (df["is_bip"] == 1)
+    & (df["is_home_run"] == 0) & (df["is_triple"] == 0)
+    & (df["is_double"] == 0)  & (df["is_single"] == 0)
+)
+df["is_xbh"] = (
+    (df["is_bip"] == 1)
+    & ((df["is_double"] == 1) | (df["is_triple"] == 1) | (df["is_home_run"] == 1))
+)
 
-# xwOBA from linear weights (BIP only)
+# xwOBA for BIP
 lw = pd.read_csv("results/linear_weights.csv").set_index("outcome_type")["lw"]
 bip = df["is_bip"] == 1
 xwoba = pd.Series(np.nan, index=df.index)
@@ -49,165 +60,102 @@ xwoba.loc[bip & (df["is_double"]   == 1) & ~(df["is_triple"] == 1)
 xwoba.loc[bip & (df["is_single"]   == 1) & ~(df["is_double"] == 1)
                                          & ~(df["is_triple"] == 1)
                                          & ~(df["is_home_run"] == 1)]                  = lw["single"]
-is_out_in_play = bip & ~(df["is_home_run"] == 1) & ~(df["is_triple"] == 1) \
-               & ~(df["is_double"] == 1) & ~(df["is_single"] == 1)
-xwoba.loc[is_out_in_play] = lw["out_in_play"]
+xwoba.loc[df["is_out_in_play"]]                                                         = lw["out_in_play"]
 df["xwoba"] = xwoba
 
-# ── Outcome categories ────────────────────────────────────────────────────────
+# ── Figure 1: outcome rates by tax quintile ───────────────────────────────────
+#
+# The right question: given a distortion/selection level, what outcomes follow?
+# Bin swings by tax quintile; show whiff / foul / out-in-play / single / XBH rates.
 
-OUTCOMES = [
-    ("All Swings",   pd.Series(True, index=df.index)),
-    ("Whiff",        df["is_whiff"] == 1),
-    ("Foul",         df["is_foul"]),
-    ("Ball in Play", bip),
-    ("Out in Play",  is_out_in_play),
-    ("Single",       bip & (df["is_single"] == 1) & ~(df["is_double"] == 1)
-                         & ~(df["is_triple"] == 1) & ~(df["is_home_run"] == 1)),
-    ("Double",       bip & (df["is_double"] == 1) & ~(df["is_triple"] == 1)
-                         & ~(df["is_home_run"] == 1)),
-    ("Triple",       bip & (df["is_triple"] == 1) & ~(df["is_home_run"] == 1)),
-    ("Home Run",     bip & (df["is_home_run"] == 1)),
+OUTCOMES_STACKED = [
+    ("Whiff",       "is_whiff",       "#c0392b"),
+    ("Foul",        "is_foul",        "#e67e22"),
+    ("Out in Play", "is_out_in_play", "#95a5a6"),
+    ("Single",      "is_single",      "#27ae60"),
+    ("XBH / HR",    "is_xbh",         "#2980b9"),
 ]
 
-rows = []
-for label, mask in OUTCOMES:
-    sub = df[mask]
-    if len(sub) < 30:
-        continue
-    rows.append({
-        "Outcome":       label,
-        "N":             len(sub),
-        "Disruption":    sub["disruption_tax"].mean(),
-        "Distortion":    sub["distortion_tax"].mean(),
-        "Selection":     sub["selection_tax"].mean(),
-        "Dist Share %":  sub["distortion_share"].mean() * 100,
-    })
+N_BINS   = 5
+BIN_LABS = ["Q1\n(lowest)", "Q2", "Q3", "Q4", "Q5\n(highest)"]
 
-tbl = pd.DataFrame(rows)
-
-# ── Figure 1: outcome table ───────────────────────────────────────────────────
-
-COLS  = ["Outcome", "N", "Disruption", "Distortion", "Selection", "Dist Share %"]
-HDRS  = ["Outcome", "N", "Disruption Tax", "Distortion Tax", "Selection Tax", "Distortion %"]
-ALIGNS = ["left", "right", "right", "right", "right", "right"]
-COL_W  = [2.10, 0.80, 1.40, 1.40, 1.40, 1.30]
-
-N_ROWS  = len(tbl)
-ROW_H   = 0.34
-HDR_H   = 0.42
-MARG_T  = 0.55
-MARG_B  = 0.20
-MARG_L  = 0.18
-FIG_W   = sum(COL_W) + 2 * MARG_L
-FIG_H   = MARG_T + HDR_H + N_ROWS * ROW_H + MARG_B
-
-fig1, ax = plt.subplots(figsize=(FIG_W, FIG_H))
-ax.set_xlim(0, FIG_W)
-ax.set_ylim(0, FIG_H)
-ax.axis("off")
+fig1, axes = plt.subplots(1, 2, figsize=(14, 5.5), sharey=False)
 fig1.patch.set_facecolor("white")
 
-# Column x positions
-xs = [MARG_L]
-for w in COL_W[:-1]:
-    xs.append(xs[-1] + w)
+for ax, metric, col_label, title in [
+    (axes[0], "distortion_tax", "Distortion Tax Quintile",
+     "Outcome Rates by Distortion Tax Level"),
+    (axes[1], "selection_tax",  "Selection Tax Quintile",
+     "Outcome Rates by Selection Tax Level"),
+]:
+    df["_bin"] = pd.qcut(df[metric], q=N_BINS, labels=False, duplicates="drop")
 
-y_top = FIG_H - MARG_T
-y_hdr = y_top - HDR_H
-y_bot = MARG_B
+    bottoms = np.zeros(N_BINS)
+    bar_w   = 0.65
 
-# Top & bottom rules
-for y, lw_px in [(y_top, 1.4), (y_hdr, 0.6), (y_bot, 1.4)]:
-    ax.plot([MARG_L, FIG_W - MARG_L], [y, y], color="#444", lw=lw_px)
+    for outcome_label, col, color in OUTCOMES_STACKED:
+        rates = df.groupby("_bin")[col].mean().reindex(range(N_BINS)).fillna(0).values
+        bars  = ax.bar(range(N_BINS), rates, bar_w, bottom=bottoms,
+                       color=color, label=outcome_label, edgecolor="white", linewidth=0.4)
+        # Label if segment is wide enough to read
+        for b_idx, (rate, bot) in enumerate(zip(rates, bottoms)):
+            if rate > 0.04:
+                ax.text(b_idx, bot + rate / 2, f"{rate:.1%}",
+                        ha="center", va="center", fontsize=7.5,
+                        color="white", fontweight="bold")
+        bottoms += rates
 
-# Header background
-ax.add_patch(mpatches.Rectangle(
-    (MARG_L, y_hdr), FIG_W - 2 * MARG_L, HDR_H,
-    facecolor="#f0f0f0", edgecolor="none", zorder=1,
-))
+    # Bin-level N annotation above bars
+    for b_idx in range(N_BINS):
+        n = (df["_bin"] == b_idx).sum()
+        ax.text(b_idx, bottoms[b_idx] + 0.005, f"n={n:,}",
+                ha="center", va="bottom", fontsize=7, color="#555")
 
-# Column headers
-for i, (hdr, xi, align) in enumerate(zip(HDRS, xs, ALIGNS)):
-    pad = 0.06 if align == "left" else COL_W[i] - 0.06
-    ha  = "left" if align == "left" else "right"
-    ax.text(xi + pad, y_hdr + HDR_H / 2, hdr,
-            ha=ha, va="center", fontsize=9, fontweight="bold",
-            color="#111", fontfamily="serif")
+    ax.set_xticks(range(N_BINS))
+    ax.set_xticklabels(BIN_LABS, fontsize=9)
+    ax.set_xlabel(col_label, fontsize=10)
+    ax.set_ylabel("Share of Swings", fontsize=10)
+    ax.set_title(title, fontsize=11, fontweight="bold", pad=8)
+    ax.set_ylim(0, 1.08)
+    ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda y, _: f"{y:.0%}"))
+    ax.spines[["top", "right"]].set_visible(False)
+    ax.grid(axis="y", alpha=0.25, linestyle="--")
 
-# Data rows
-DISRUPTION_RANGE = (tbl["Disruption"].min(), tbl["Disruption"].max())
-CMAP = plt.cm.RdYlGn_r  # red = high disruption, green = low
+# Shared legend
+handles = [mpatches.Patch(color=c, label=l) for l, _, c in OUTCOMES_STACKED]
+fig1.legend(handles=handles, loc="lower center", ncol=5,
+            fontsize=9, frameon=False, bbox_to_anchor=(0.5, -0.04))
 
-for i, (_, row) in enumerate(tbl.iterrows()):
-    y_row_top = y_hdr - i * ROW_H
-    y_row_bot = y_row_top - ROW_H
-    cy = (y_row_top + y_row_bot) / 2
-
-    # Alternating shade
-    if i % 2 == 1:
-        ax.add_patch(mpatches.Rectangle(
-            (MARG_L, y_row_bot), FIG_W - 2 * MARG_L, ROW_H,
-            facecolor="#fafafa", edgecolor="none", zorder=0,
-        ))
-
-    # Row separator
-    ax.plot([MARG_L, FIG_W - MARG_L], [y_row_bot, y_row_bot],
-            color="#e0e0e0", lw=0.4)
-
-    # Cell values
-    vals = [
-        row["Outcome"],
-        f"{int(row['N']):,}",
-        f"{row['Disruption']:+.4f}",
-        f"{row['Distortion']:+.4f}",
-        f"{row['Selection']:+.4f}",
-        f"{row['Dist Share %']:.1f}%",
-    ]
-    for j, (val, xi, align) in enumerate(zip(vals, xs, ALIGNS)):
-        pad = 0.06 if align == "left" else COL_W[j] - 0.06
-        ha  = "left" if align == "left" else "right"
-        fw  = "bold" if j == 0 and i == 0 else "normal"
-        ax.text(xi + pad, cy, val,
-                ha=ha, va="center", fontsize=8.5, color="#111",
-                fontfamily="serif", fontweight=fw)
-
-# Title
-ax.text(MARG_L, FIG_H - MARG_T * 0.38,
-        "Mean Disruption / Distortion / Selection Tax by Swing Outcome",
-        ha="left", va="center", fontsize=11, fontweight="bold",
-        color="#111", fontfamily="serif")
-ax.text(MARG_L, FIG_H - MARG_T * 0.75,
-        "2023–2025 · min. 30 swings per cell · negative = pitcher advantage",
-        ha="left", va="center", fontsize=8.5, color="#555", fontfamily="serif")
-
-out1 = "results/figures/outcome_table.png"
+fig1.suptitle(
+    "Swing Outcome Rates by Distortion / Selection Tax Level  ·  2023–2025",
+    fontsize=12, fontweight="bold", y=1.01,
+)
+fig1.tight_layout()
+out1 = "results/figures/outcome_rates.png"
 fig1.savefig(out1, dpi=150, bbox_inches="tight", facecolor="white")
 plt.close(fig1)
 print(f"Saved {out1}")
 
-# ── Figure 2: xwOBA relationship ──────────────────────────────────────────────
+# ── Figure 2: xwOBA on contact vs tax metrics ─────────────────────────────────
 
 bip_df = df[bip].copy()
-N_BINS = 10
+N_BINS2 = 10
 
-fig2, axes = plt.subplots(1, 2, figsize=(13, 5))
+fig2, axes2 = plt.subplots(1, 2, figsize=(13, 5))
 fig2.patch.set_facecolor("white")
 
-METRIC_META = [
-    ("distortion_tax", "Distortion Tax", "#d73027"),
-    ("selection_tax",  "Selection Tax",  "#2166ac"),
-]
-
-for ax, (metric, label, color) in zip(axes, METRIC_META):
-    bip_df["_bin"] = pd.qcut(bip_df[metric], q=N_BINS, labels=False, duplicates="drop")
+for ax, metric, label, color in [
+    (axes2[0], "distortion_tax", "Distortion Tax", "#d73027"),
+    (axes2[1], "selection_tax",  "Selection Tax",  "#2166ac"),
+]:
+    bip_df["_bin"] = pd.qcut(bip_df[metric], q=N_BINS2, labels=False, duplicates="drop")
     summary = (
         bip_df.groupby("_bin")
         .agg(
-            mid      =(metric,  "mean"),
-            mean_xw  =("xwoba", "mean"),
-            se_xw    =("xwoba", lambda x: sem(x, nan_policy="omit")),
-            n        =("xwoba", "count"),
+            mid    =(metric,  "mean"),
+            mean_xw=("xwoba", "mean"),
+            se_xw  =("xwoba", lambda x: sem(x, nan_policy="omit")),
+            n      =("xwoba", "count"),
         )
         .reset_index()
     )
@@ -222,7 +170,6 @@ for ax, (metric, label, color) in zip(axes, METRIC_META):
             "o-", color=color, linewidth=2, markersize=6,
             markerfacecolor="white", markeredgewidth=2)
 
-    # Annotate n per bin
     for _, r in summary.iterrows():
         ax.text(r["mid"], r["mean_xw"] + 0.003, f"n={int(r['n']):,}",
                 ha="center", va="bottom", fontsize=6.5, color="#666")
@@ -232,8 +179,6 @@ for ax, (metric, label, color) in zip(axes, METRIC_META):
     ax.set_title(f"Contact Quality vs {label}", fontsize=12, fontweight="bold")
     ax.spines[["top", "right"]].set_visible(False)
     ax.grid(True, alpha=0.25, linestyle="--")
-
-    # Zero line
     ax.axhline(0, color="#aaa", lw=0.8, linestyle=":")
 
 fig2.suptitle(
@@ -241,7 +186,6 @@ fig2.suptitle(
     fontsize=12, fontweight="bold", y=1.01,
 )
 fig2.tight_layout()
-
 out2 = "results/figures/xwoba_relationship.png"
 fig2.savefig(out2, dpi=150, bbox_inches="tight", facecolor="white")
 plt.close(fig2)
