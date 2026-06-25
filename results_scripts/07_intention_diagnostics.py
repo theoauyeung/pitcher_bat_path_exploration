@@ -267,7 +267,7 @@ def plot_fixed_effects_table(
     fig, ax = plt.subplots(figsize=(13, 0.55 * n_rows + 1.8))
     ax.axis("off")
     fig.suptitle(
-        "Phase A Intention Model — Fixed Effects (Bambi ADVI posterior, 95% CI)\n"
+        "Fixed Effects (Bambi ADVI posterior, 95% CI)\n"
         "* 95% CI excludes 0   green = positive   red = negative   grey = n/a",
         fontsize=10, fontweight="bold", y=1.01,
     )
