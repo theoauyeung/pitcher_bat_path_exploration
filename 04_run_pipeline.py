@@ -207,7 +207,14 @@ def run(
         )
         intended_df = _A.predict_intended(intention, swings)
         intended_df.to_parquet(intention_cache, index=True)
-        print(f"Phase A done -> {intention_cache}")
+        # Save idata + training data for downstream coefficient extraction.
+        # Bambi Model objects can't be pickled (Python 3.14 FrameLocalsProxy), so only
+        # idata and data are written — sufficient for _extract_fixed_effects in 07.py.
+        joblib.dump(
+            {"idata": intention["idata"], "data": intention["data"]},
+            "models/intention_result.joblib",
+        )
+        print(f"Phase A done -> {intention_cache}, models/intention_result.joblib")
 
     # swing_deviations: adds {resp}_dev = realized − intended columns
     swings = _A.swing_deviations(swings, intended_df)
@@ -302,6 +309,7 @@ def run(
     print("  results/xrv_causal.parquet")
     print("  results/distortion_pitcher.csv")
     print("  results/distortion_batter.csv")
+    print("  models/intention_result.joblib")
     print("  models/causal_models.joblib")
 
     return results, {
