@@ -26,7 +26,7 @@ Path("results/figures").mkdir(parents=True, exist_ok=True)
 
 METRICS = ["disruption_tax", "distortion_tax", "selection_tax", "distortion_share"]
 METRIC_LABELS = {
-    "disruption_tax":   "Disruption Tax",
+    "disruption_tax":   "xRV Residual (Actual - Intended)",
     "distortion_tax":   "Distortion Tax",
     "selection_tax":    "Selection Tax",
     "distortion_share": "Distortion Share",
