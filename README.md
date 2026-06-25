@@ -34,12 +34,13 @@ python 03_causal_models.py      # Phase B: fit mediation + outcome models → mo
 python 04_run_pipeline.py       # orchestrate Phase A → B → results/xrv_causal.parquet
 ```
 
-Visualization (optional, after pipeline):
+Visualization and results scripts (optional, after pipeline — run from project root):
 
 ```bash
-python 05_trajectory_plot.py       # pitch trajectory plots with pre/post-commit split
-python 06_kinematic_diagram.py     # annotated batter-view kinematic diagrams
-python 07_intention_diagnostics.py # Phase A model diagnostics (distributions, count/zone effects)
+python results_scripts/05_trajectory_plot.py       # pitch trajectory plots with pre/post-commit split
+python results_scripts/06_kinematic_diagram.py     # annotated batter-view kinematic diagrams
+python results_scripts/07_intention_diagnostics.py # Phase A model diagnostics (distributions, count/zone effects)
+python results_scripts/08_reliability.py           # split-half and year-over-year reliability of distortion tax
 ```
 
 ---
@@ -111,15 +112,22 @@ Core packages: `bambi`, `pymc`, `statsmodels`, `xgboost`, `pandas`, `numpy`, `ma
 
 ## Figures
 
-**Intention model diagnostics** (`07_intention_diagnostics.py`):
+**Intention model diagnostics** (`results_scripts/07_intention_diagnostics.py`):
 
 | Figure | Contents |
 |--------|----------|
 | `07a_intention_distributions.png` | Intended vs. realized distributions + deviation histograms per response |
 | `07b_count_effects.png` | Mean intended swing shape by count group and (balls × strikes) matrix |
 | `07c_zone_heatmaps.png` | Mean intended shape and deviation across the strike zone |
+| `07d_fixed_effects.png` | Phase A fixed-effect coefficient table (posterior means + 95% CI) |
 
-**Annotated kinematic diagrams** (`06_kinematic_diagram.py`):
+**Reliability analysis** (`results_scripts/08_reliability.py`):
+
+| Figure | Contents |
+|--------|----------|
+| `08_reliability.png` | Split-half (Spearman-Brown) and year-over-year r for each tax metric |
+
+**Annotated kinematic diagrams** (`results_scripts/06_kinematic_diagram.py`):
 
 Pulled from the following videos: (https://baseballsavant.mlb.com/sporty-videos?playId=fe30b4fe-120e-4f6c-a258-a624bc52452f, 
 https://baseballsavant.mlb.com/sporty-videos?playId=84f68d2c-ea0d-351c-b752-2d4aec739924, https://baseballsavant.mlb.com/sporty-videos?playId=cf50242d-6c5b-30f4-a051-300f33655ef9, https://baseballsavant.mlb.com/sporty-videos?playId=39e968ef-398c-3112-8856-75799afc21df)

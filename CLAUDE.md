@@ -104,7 +104,7 @@ Key identity: `dev_x = pfx_x·(commit_s/t_plate)²` — post-commit deviation is
 - `x_commit, y_commit, z_commit` — ball position at commit time (ft)
 - `vx_commit, vy_commit, vz_commit` — velocity at commit time (ft/s)
 - `t_plate` — total flight time from release to plate (s); valid range ≈ [0.35, 0.60]s
-- `R_x/y/z, V_x/y/z, A_x/y/z` — 9-parameter trajectory params (used by visualizations in `06_kinematic_diagram.py`)
+- `R_x/y/z, V_x/y/z, A_x/y/z` — 9-parameter trajectory params (used by visualizations in `results_scripts/06_kinematic_diagram.py`)
 
 **Why 150 ms is the default commit time:** Conservative choice gives a lower bound on distortion. Misfiling pre-commit movement as distortion contaminates the treatment regressor; misfiling distortion as pre-commit movement only absorbs it into the control. The asymmetry means an early setting biases toward less distortion — so any surviving effect is a conservative estimate. The robustness grid over 125/150/175/200 ms demotes commit-time uncertainty to a sensitivity check.
 
@@ -284,7 +284,7 @@ Runs Phase A → Phase B in sequence. Key behaviors:
 
 ---
 
-### `07_intention_diagnostics.py` — Phase A diagnostic visualizations
+### `results_scripts/07_intention_diagnostics.py` — Phase A diagnostic visualizations
 
 Loads `models/intended_df.parquet` joined with `data/swings_precommit.parquet` to produce three diagnostic figures. Requires both files to exist (run `04_run_pipeline.py` first).
 
@@ -306,7 +306,7 @@ Loads `models/intended_df.parquet` joined with `data/swings_precommit.parquet` t
 
 ---
 
-### `06_kinematic_diagram.py` — Broadcast annotation cards
+### `results_scripts/06_kinematic_diagram.py` — Broadcast annotation cards
 
 Produces two-panel figures: a game screenshot (left) with an arrow callout, and a dark metrics panel (right) showing pitch profile, swing shape, and disruption analysis.
 
