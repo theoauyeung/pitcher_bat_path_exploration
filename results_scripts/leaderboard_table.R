@@ -62,12 +62,11 @@ by_pitch <- df |>
 # ── Build gt table (top 18 by xRV Residual) ───────────────────────────────────
 
 top18 <- by_pitch |>
-  slice_head(n = 18) |>
-  mutate(xRV_pct = rank(xRV_Residual) / n())  # percentile rank within top18
+  slice_head(n = 18)
 
 tbl <- top18 |>
   select(pitcher_id, pitcher_full_name, pitch_label,
-         Pitches, xRV_Residual, xRV_pct, Distortion, Selection) |>
+         Pitches, xRV_Residual, Distortion, Selection) |>
   gt() |>
 
   # Headshot via MLBAM ID
@@ -86,13 +85,12 @@ tbl <- top18 |>
 
   # Colour scale by percentile rank: red = lowest (best pitcher), blue = highest
   data_color(
-    columns = xRV_pct,
-    fn = col_numeric(
-      palette = c("#d73027", "#f7f7f7", "#2166ac"),
-      domain  = c(0, 1)
-    )
+    columns = xRV_Residual,
+    fn = function(x) {
+      pct <- rank(x) / length(x)
+      col_numeric(c("#d73027", "#f7f7f7", "#2166ac"), domain = c(0, 1))(pct)
+    }
   ) |>
-  cols_hide(columns = xRV_pct) |>
 
   # Header
   tab_header(
@@ -125,17 +123,8 @@ tbl <- top18 |>
 
 # ── Save ──────────────────────────────────────────────────────────────────────
 
-html_out <- "results/figures/09_leaderboard_by_pitch.html"
-gtsave(tbl, html_out)
-cat("Saved", html_out, "\n")
-
-# PNG requires webshot2: install.packages("webshot2"); webshot2::install_phantomjs()
-png_out <- "results/figures/09_leaderboard_by_pitch.png"
+png_out <- "results/figures/leaderboard_by_pitch.png"
 tryCatch(
   { gtsave(tbl, png_out, vwidth = 1400, vheight = 900); cat("Saved", png_out, "\n") },
   error = function(e) cat("PNG export skipped (install webshot2 for PNG):", conditionMessage(e), "\n")
 )
-
-# CSV for reference
-write.csv(by_pitch, "results/figures/09_leaderboard_by_pitch.csv", row.names = FALSE)
-cat("Saved results/figures/09_leaderboard_by_pitch.csv\n")
