@@ -169,28 +169,39 @@ def _add_n_labels(ax, df, group_col, order):
 
 # ── Figure 4: Fixed effects summary table ─────────────────────────────────────
 
-# Display names for Bambi's posterior variable names → readable labels
-_PARAM_LABELS = {
-    "Intercept":                        "Intercept",
-    "scale(balls)":                     "Balls (z)",
-    "scale(strikes)":                   "Strikes (z)",
-    "scale(plate_x_bat)":               "Plate X batter (z)",
-    "scale(plate_z)":                   "Plate Z (z)",
-    "scale(plate_z_sq)":                "Plate Z² (z)",
-    "scale(offset_y_ms)":               "Timing (z)",
-    "pitcher_throws_L":                 "Pitcher LHP",
-    "pitcher_throws_L:scale(plate_x_bat)": "LHP × Plate X",
+# Canonical row order and display labels
+_PARAM_ORDER = [
+    "Intercept",
+    "scale(balls)",
+    "scale(strikes)",
+    "scale(plate_x_bat)",
+    "scale(plate_z)",
+    "scale(plate_z_sq)",
+    "scale(offset_y_ms)",
+    "pitcher_throws_L",
+    "pitcher_throws_L:scale(plate_x_bat)",
+]
+
+# Greek-letter labels for academic table
+_PARAM_GREEK = {
+    "Intercept":                            r"$\mu_0$",
+    "scale(balls)":                         r"$\beta^B$",
+    "scale(strikes)":                       r"$\beta^S$",
+    "scale(plate_x_bat)":                   r"$\beta^X$",
+    "scale(plate_z)":                       r"$\beta^Z$",
+    "scale(plate_z_sq)":                    r"$\beta^{Z^2}$",
+    "scale(offset_y_ms)":                   r"$\beta^T$",
+    "pitcher_throws_L":                     r"$\beta^L$",
+    "pitcher_throws_L:scale(plate_x_bat)":  r"$\beta^{LX}$",
 }
 
-# Canonical row order
-_PARAM_ORDER = list(_PARAM_LABELS.keys())
-
-_COL_LABELS = {
-    "vert_attack_angle":  "VAA (°)",
-    "horz_attack_angle":  "HAA (°)",
-    "swing_path_tilt":    "Tilt (°)",
-    "bat_speed":          "Bat Spd (mph)",
-    "swing_length":       "Swing Len (ft)",
+# Column group headers (no units — kept in sub-header context)
+_COL_GROUP = {
+    "vert_attack_angle":  "Vert. Attack Angle",
+    "horz_attack_angle":  "Horz. Attack Angle",
+    "swing_path_tilt":    "Swing Path Tilt",
+    "bat_speed":          "Bat Speed",
+    "swing_length":       "Swing Length",
 }
 
 _RE_SUFFIXES  = ("_sigma", "_offset")
@@ -202,7 +213,7 @@ _ANGULAR_ONLY = {
 
 
 def _extract_fixed_effects(idata):
-    """Pull posterior mean, SD, and 95% CI for every scalar fixed effect."""
+    """Pull posterior mean and 95% CI for every scalar fixed effect."""
     post = idata.posterior
     out  = {}
     for v in post.data_vars:
@@ -212,7 +223,6 @@ def _extract_fixed_effects(idata):
             draws = post[v].values.ravel()
             out[v] = {
                 "mean": float(draws.mean()),
-                "sd":   float(draws.std()),
                 "lo":   float(np.percentile(draws, 2.5)),
                 "hi":   float(np.percentile(draws, 97.5)),
             }
@@ -223,82 +233,112 @@ def plot_fixed_effects_table(
     model_path="models/intention_result.joblib",
     out="results/figures/07d_fixed_effects.png",
 ):
-    """Load Bambi idata from joblib, extract fixed-effect posteriors, render table."""
+    """Academic-style fixed-effects table: grouped column headers, Greek row labels,
+    separate Mean / Lower / Upper columns, horizontal rules only."""
     print(f"  Loading {model_path}...")
-    result = joblib.load(model_path)
-    idata_dict = result["idata"]   # {resp: InferenceData}
+    result    = joblib.load(model_path)
+    coefs     = {r: _extract_fixed_effects(result["idata"][r]) for r in RESPONSES}
 
-    # Build per-response coefficient dicts
-    coefs = {resp: _extract_fixed_effects(idata_dict[resp]) for resp in RESPONSES}
+    # ── Layout (all in inches) ────────────────────────────────────────────────
+    LABEL_W  = 1.5    # parameter label column
+    SUB_W    = 0.82   # each of Mean / Lower / Upper
+    ROW_H    = 0.30   # data row height
+    HDR_H    = 0.30   # each header tier height
+    MARG_L   = 0.08
+    MARG_R   = 0.08
+    MARG_T   = 0.12
+    MARG_B   = 0.12
+    N_SUB    = 3      # Mean, Lower, Upper
+    N_R      = len(RESPONSES)
+    N_P      = len(_PARAM_ORDER)
 
-    # Assemble cell text and colour
-    cell_text, cell_color = [], []
-    for param_key in _PARAM_ORDER:
-        row_text, row_color = [], []
-        for resp in RESPONSES:
-            is_ang = resp in ANGULAR
-            if param_key in _ANGULAR_ONLY and not is_ang:
-                row_text.append("—")
-                row_color.append("#f0f0f0")
-                continue
-            stats = coefs[resp].get(param_key)
-            if stats is None:
-                row_text.append("—")
-                row_color.append("#f0f0f0")
-                continue
-            # Significance: p≈0 when CI excludes 0
-            sig = "" if (stats["lo"] < 0 < stats["hi"]) else "*"
-            row_text.append(
-                f"{stats['mean']:+.3f}{sig}\n[{stats['lo']:.3f}, {stats['hi']:.3f}]"
-            )
-            if sig == "":
-                row_color.append("#ffffff")
-            elif stats["mean"] > 0:
-                row_color.append("#dff0d8")
-            else:
-                row_color.append("#fde8e8")
-        cell_text.append(row_text)
-        cell_color.append(row_color)
+    fig_w = MARG_L + LABEL_W + N_R * N_SUB * SUB_W + MARG_R
+    fig_h = MARG_T + 2 * HDR_H + N_P * ROW_H + MARG_B
 
-    row_labels = [_PARAM_LABELS[k] for k in _PARAM_ORDER]
-    col_labels  = [_COL_LABELS[r] for r in RESPONSES]
-    n_rows, n_cols = len(_PARAM_ORDER), len(RESPONSES)
-
-    fig, ax = plt.subplots(figsize=(13, 0.55 * n_rows + 1.8))
+    fig = plt.figure(figsize=(fig_w, fig_h))
+    ax  = fig.add_axes([0, 0, 1, 1])
+    ax.set_xlim(0, fig_w)
+    ax.set_ylim(0, fig_h)
     ax.axis("off")
-    fig.suptitle(
-        "Fixed Effects (Bambi ADVI posterior, 95% CI)\n"
-        "* 95% CI excludes 0   green = positive   red = negative   grey = n/a",
-        fontsize=10, fontweight="bold", y=1.01,
-    )
 
-    tbl = ax.table(
-        cellText=cell_text,
-        cellColours=cell_color,
-        rowLabels=row_labels,
-        colLabels=col_labels,
-        cellLoc="center",
-        loc="center",
-    )
-    tbl.auto_set_font_size(False)
-    tbl.set_fontsize(8.5)
-    tbl.scale(1, 2.2)
+    x0    = MARG_L
+    x1    = fig_w - MARG_R
+    y_top = fig_h - MARG_T
+    y_g   = y_top - HDR_H        # bottom of group-header row
+    y_s   = y_g   - HDR_H        # bottom of sub-header row = top of data
+    y_bot = MARG_B
 
-    for j in range(n_cols):
-        tbl[(0, j)].set_facecolor("#2c3e50")
-        tbl[(0, j)].get_text().set_color("white")
-        tbl[(0, j)].get_text().set_fontweight("bold")
+    def grp_x(j):   return x0 + LABEL_W + j * N_SUB * SUB_W
+    def sub_cx(j, k): return grp_x(j) + (k + 0.5) * SUB_W
 
-    fig.tight_layout()
-    fig.savefig(out, dpi=150, bbox_inches="tight")
+    lw_h = 0.9   # horizontal rule weight
+    lw_v = 0.5   # vertical divider weight
+
+    # Horizontal rules
+    ax.plot([x0, x1], [y_top, y_top], "k-", lw=lw_h)          # top
+    ax.plot([x0 + LABEL_W, x1], [y_g, y_g], "k-", lw=0.4)     # between header tiers
+    ax.plot([x0, x1], [y_s,   y_s],   "k-", lw=lw_h)          # below headers
+    ax.plot([x0, x1], [y_bot, y_bot], "k-", lw=lw_h)          # bottom
+
+    # Vertical dividers: after label col + between response groups + right edge
+    for xv in [x0 + LABEL_W] + [grp_x(j) for j in range(1, N_R)] + [x1]:
+        ax.plot([xv, xv], [y_bot, y_top], "k-", lw=lw_v)
+
+    # Group headers (response names, centered over 3 sub-cols)
+    for j, resp in enumerate(RESPONSES):
+        cx = grp_x(j) + 1.5 * SUB_W
+        cy = (y_top + y_g) / 2
+        ax.text(cx, cy, _COL_GROUP[resp],
+                ha="center", va="center", fontsize=8.5, fontfamily="serif")
+
+    # Sub-headers
+    ax.text(x0 + LABEL_W / 2, (y_g + y_s) / 2, "Parameter",
+            ha="center", va="center", fontsize=8, fontfamily="serif")
+    for j in range(N_R):
+        for k, lbl in enumerate(["Mean", "Lower", "Upper"]):
+            ax.text(sub_cx(j, k), (y_g + y_s) / 2, lbl,
+                    ha="center", va="center", fontsize=8, fontfamily="serif")
+
+    # Data rows
+    for i, param in enumerate(_PARAM_ORDER):
+        cy = y_s - (i + 0.5) * ROW_H
+        ax.text(x0 + LABEL_W / 2, cy, _PARAM_GREEK[param],
+                ha="center", va="center", fontsize=9, fontfamily="serif")
+        for j, resp in enumerate(RESPONSES):
+            is_ang = resp in ANGULAR
+            if param in _ANGULAR_ONLY and not is_ang:
+                for k in range(N_SUB):
+                    ax.text(sub_cx(j, k), cy, "—",
+                            ha="center", va="center", fontsize=8.5,
+                            color="#999999", fontfamily="serif")
+            else:
+                stats = coefs[resp].get(param)
+                if stats:
+                    for k, val in enumerate([stats["mean"], stats["lo"], stats["hi"]]):
+                        ax.text(sub_cx(j, k), cy, f"{val:.3f}",
+                                ha="center", va="center", fontsize=8.5,
+                                fontfamily="serif")
+
+    fig.savefig(out, dpi=150, bbox_inches="tight", facecolor="white")
     plt.close(fig)
 
-    # CSV dump for easy inspection
+    # CSV
     csv_path = out.replace(".png", ".csv")
-    rows_for_csv = []
-    for label, row in zip(row_labels, cell_text):
-        rows_for_csv.append([label] + row)
-    pd.DataFrame(rows_for_csv, columns=["Predictor"] + col_labels).to_csv(csv_path, index=False)
+    rows_csv = []
+    for param in _PARAM_ORDER:
+        row = {"Parameter": _PARAM_GREEK[param]}
+        for resp in RESPONSES:
+            is_ang = resp in ANGULAR
+            pfx = _COL_GROUP[resp]
+            if param in _ANGULAR_ONLY and not is_ang:
+                row[f"{pfx}_Mean"] = "—"; row[f"{pfx}_Lower"] = "—"; row[f"{pfx}_Upper"] = "—"
+            else:
+                s = coefs[resp].get(param, {})
+                row[f"{pfx}_Mean"]  = f"{s.get('mean', float('nan')):.3f}"
+                row[f"{pfx}_Lower"] = f"{s.get('lo',   float('nan')):.3f}"
+                row[f"{pfx}_Upper"] = f"{s.get('hi',   float('nan')):.3f}"
+        rows_csv.append(row)
+    pd.DataFrame(rows_csv).to_csv(csv_path, index=False)
 
     print(f"Saved {out}")
     print(f"Saved {csv_path}")

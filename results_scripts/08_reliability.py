@@ -113,26 +113,16 @@ def build_table(df):
         rows.append({
             "metric":       metric,
             "sh_r":         sh_r,
-            "sh_sd":        sh_sd,
-            "sh_n":         sh_n,
             "yoy_23_24_r":  yoy_23_24_r,
-            "yoy_23_24_n":  n_23_24,
             "yoy_24_25_r":  yoy_24_25_r,
-            "yoy_24_25_n":  n_24_25,
         })
     return pd.DataFrame(rows).set_index("metric")
 
 
 # ── Render table ───────────────────────────────────────────────────────────────
 
-def _fmt_r(r, n, sd=None):
-    if np.isnan(r):
-        return "—"
-    s = f"r = {r:.3f}"
-    if sd is not None:
-        s += f" ± {sd:.3f}"
-    s += f"\n(n = {n})"
-    return s
+def _fmt_r(r):
+    return "—" if np.isnan(r) else f"{r:.3f}"
 
 
 def _r_color(r):
@@ -163,9 +153,9 @@ def render_table(tbl, out="results/figures/08_reliability.png"):
 
     for metric, row in tbl.iterrows():
         cell_text.append([
-            _fmt_r(row["sh_r"],       row["sh_n"],      sd=row["sh_sd"]),
-            _fmt_r(row["yoy_23_24_r"], row["yoy_23_24_n"]),
-            _fmt_r(row["yoy_24_25_r"], row["yoy_24_25_n"]),
+            _fmt_r(row["sh_r"]),
+            _fmt_r(row["yoy_23_24_r"]),
+            _fmt_r(row["yoy_24_25_r"]),
         ])
         cell_color.append([
             _r_color(row["sh_r"]),
