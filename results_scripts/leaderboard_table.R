@@ -64,6 +64,10 @@ by_pitch <- df |>
 top18 <- by_pitch |>
   slice_head(n = 18)
 
+# Domain anchored to the full qualifying dataset so colours reflect each
+# pitcher's position among all pitchers, not just the top 18.
+full_range <- range(by_pitch$xRV_Residual, na.rm = TRUE)
+
 tbl <- top18 |>
   select(pitcher_id, pitcher_full_name, pitch_label,
          Pitches, xRV_Residual, Distortion, Selection) |>
@@ -83,13 +87,13 @@ tbl <- top18 |>
     Selection         = "Selection Tax"
   ) |>
 
-  # Colour scale by percentile rank: red = lowest (best pitcher), blue = highest
+  # Red = lowest (best pitcher), blue = highest; domain = full dataset range
   data_color(
     columns = xRV_Residual,
-    fn = function(x) {
-      pct <- rank(x) / length(x)
-      col_numeric(c("#d73027", "#f7f7f7", "#2166ac"), domain = c(0, 1))(pct)
-    }
+    fn = col_numeric(
+      palette = c("#d73027", "#f7f7f7", "#2166ac"),
+      domain  = full_range
+    )
   ) |>
 
   # Header
