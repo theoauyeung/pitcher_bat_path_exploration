@@ -1,15 +1,12 @@
-# 09_leaderboard_table.R
-# Pitcher distortion / xRV-residual leaderboard table using gt + mlbplotR.
+# leaderboard_table.R
+# Pitcher leaderboard tables using gt + mlbplotR.
+# Produces two PNGs: sorted by xRV Residual and by Distortion Tax.
 #
 # Run from project root:
-#   Rscript results_scripts/09_leaderboard_table.R
+#   Rscript results_scripts/leaderboard_table.R
 #
 # Required packages:
-#   install.packages(c("arrow", "dplyr", "gt", "gtExtras", "mlbplotR", "scales"))
-#
-# Outputs:
-#   results/figures/09_leaderboard_by_pitch.html
-#   results/figures/09_leaderboard_by_pitch.png   (if webshot2 installed)
+#   install.packages(c("arrow", "dplyr", "gt", "gtExtras", "mlbplotR", "scales", "webshot2"))
 
 library(arrow)
 library(dplyr)
@@ -23,11 +20,9 @@ dir.create("results/figures", showWarnings = FALSE, recursive = TRUE)
 
 xrv <- read_parquet("results/xrv_causal.parquet")
 
-# Pull pitcher names and pitch type from swings parquet (avoid loading all cols)
 names_df <- read_parquet(
   "data/swings_precommit.parquet",
-  col_select = c("game_pk", "at_bat_number", "pitch_number",
-                 "pitcher_full_name")
+  col_select = c("game_pk", "at_bat_number", "pitch_number", "pitcher_full_name")
 ) |>
   distinct(game_pk, at_bat_number, pitch_number, .keep_all = TRUE)
 
@@ -47,88 +42,117 @@ by_pitch <- df |>
   filter(!is.na(disruption_tax), !is.na(pitcher_full_name)) |>
   group_by(pitcher_id, pitcher_full_name, pitch_type) |>
   summarise(
-    Pitches       = n(),
-    xRV_Residual  = round(mean(disruption_tax, na.rm = TRUE), 3),
-    Distortion    = round(mean(distortion_tax,  na.rm = TRUE), 3),
-    Selection     = round(mean(selection_tax,   na.rm = TRUE), 3),
+    Pitches    = n(),
+    xRV        = round(mean(disruption_tax, na.rm = TRUE), 3),
+    Distortion = round(mean(distortion_tax,  na.rm = TRUE), 3),
+    Selection  = round(mean(selection_tax,   na.rm = TRUE), 3),
     .groups = "drop"
   ) |>
   filter(Pitches >= 100) |>
   mutate(
-    pitch_label = coalesce(PITCH_LABELS[pitch_type], pitch_type)
-  ) |>
-  arrange(xRV_Residual)   # most negative = best pitcher advantage
+    pitch_label    = coalesce(PITCH_LABELS[pitch_type], pitch_type),
+    # Inverted percentile ranks on full dataset: 100 = best (lowest raw value)
+    xRV_pct        = as.integer(round((n() + 1 - rank(xRV))        / n() * 100)),
+    distortion_pct = as.integer(round((n() + 1 - rank(Distortion)) / n() * 100))
+  )
 
-# ── Build gt table (top 18 by xRV Residual) ───────────────────────────────────
+# Color palette: 0 = blue (worst), 100 = red (best)
+PCT_PAL <- col_numeric(c("#2166ac", "#f7f7f7", "#d73027"), domain = c(0, 100))
 
-top18 <- by_pitch |>
+# ── Shared table styling ───────────────────────────────────────────────────────
+
+apply_style <- function(tbl) {
+  tbl |>
+    tab_style(
+      style     = list(cell_text(weight = "bold")),
+      locations = cells_column_labels(everything())
+    ) |>
+    tab_options(
+      table.font.size                 = 13,
+      data_row.padding                = px(4),
+      table.width                     = px(900),
+      heading.background.color        = "#f7f7f7",
+      column_labels.background.color  = "#f0f0f0",
+      table.border.top.color          = "#cccccc",
+      table.border.bottom.color       = "#cccccc"
+    )
+}
+
+save_png <- function(tbl, path) {
+  tryCatch(
+    { gtsave(tbl, path, vwidth = 1400, vheight = 900); cat("Saved", path, "\n") },
+    error = function(e) cat("PNG export skipped:", conditionMessage(e), "\n")
+  )
+}
+
+# ── Table 1: top 18 by xRV Residual percentile ────────────────────────────────
+
+top18_xrv <- by_pitch |>
+  arrange(xRV) |>
   slice_head(n = 18)
 
-# Domain anchored to the full qualifying dataset so colours reflect each
-# pitcher's position among all pitchers, not just the top 18.
-full_range <- range(by_pitch$xRV_Residual, na.rm = TRUE)
-
-tbl <- top18 |>
-  select(pitcher_id, pitcher_full_name, pitch_label,
-         Pitches, xRV_Residual, Distortion, Selection) |>
+tbl_xrv <- top18_xrv |>
+  select(pitcher_id, pitcher_full_name, pitch_label, Pitches,
+         xRV_pct, Distortion, Selection) |>
   gt() |>
-
-  # Headshot via MLBAM ID
   gt_fmt_mlb_headshot(columns = pitcher_id, height = 35) |>
-
-  # Column labels
   cols_label(
     pitcher_id        = "",
     pitcher_full_name = "Pitcher",
     pitch_label       = "Pitch",
     Pitches           = "Pitches",
-    xRV_Residual      = "xRV Residual",
+    xRV_pct          = "xRV Residual Pctile",
     Distortion        = "Distortion Tax",
     Selection         = "Selection Tax"
   ) |>
-
-  # Red = lowest (best pitcher), blue = highest; domain = full dataset range
   data_color(
-    columns = xRV_Residual,
-    fn = col_numeric(
-      palette = c("#d73027", "#f7f7f7", "#2166ac"),
-      domain  = full_range
-    )
+    columns = xRV_pct,
+    fn      = PCT_PAL
   ) |>
-
-  # Header
   tab_header(
     title    = md("**Pitcher xRV Residual Leaderboard**"),
-    subtitle = md("Mean run-value cost per swing  ·  min. 100 pitches  ·  2023–2025")
+    subtitle = md("Percentile rank among all pitchers with ≥100 pitches  ·  2023–2025")
   ) |>
-
-  # Footnote explaining the metrics
   tab_footnote(
-    footnote = "xRV Residual: total swing-disruption cost (realized − intended xRV). Distortion: movement-caused share. Selection: batter-decision share.",
-    locations = cells_column_labels(xRV_Residual)
+    footnote  = "xRV Residual Pctile: percentile rank (100 = best) for total swing-disruption cost across all qualifying pitcher–pitch combos.",
+    locations = cells_column_labels(xRV_pct)
   ) |>
+  apply_style()
 
-  # Bold column headers
-  tab_style(
-    style     = list(cell_text(weight = "bold")),
-    locations = cells_column_labels(everything())
+save_png(tbl_xrv, "results/figures/leaderboard_by_pitch.png")
+
+# ── Table 2: top 18 by Distortion Tax percentile ──────────────────────────────
+
+top18_dist <- by_pitch |>
+  arrange(Distortion) |>
+  slice_head(n = 18)
+
+tbl_dist <- top18_dist |>
+  select(pitcher_id, pitcher_full_name, pitch_label, Pitches,
+         xRV, distortion_pct, Selection) |>
+  gt() |>
+  gt_fmt_mlb_headshot(columns = pitcher_id, height = 35) |>
+  cols_label(
+    pitcher_id        = "",
+    pitcher_full_name = "Pitcher",
+    pitch_label       = "Pitch",
+    Pitches           = "Pitches",
+    xRV               = "xRV Residual",
+    distortion_pct    = "Distortion Tax Pctile",
+    Selection         = "Selection Tax"
   ) |>
+  data_color(
+    columns = distortion_pct,
+    fn      = PCT_PAL
+  ) |>
+  tab_header(
+    title    = md("**Pitcher Distortion Tax Leaderboard**"),
+    subtitle = md("Percentile rank among all pitchers with ≥100 pitches  ·  2023–2025")
+  ) |>
+  tab_footnote(
+    footnote  = "Distortion Tax Pctile: percentile rank (100 = best) for movement-caused swing deviation cost.",
+    locations = cells_column_labels(distortion_pct)
+  ) |>
+  apply_style()
 
-  # Table styling
-  tab_options(
-    table.font.size            = 13,
-    data_row.padding           = px(4),
-    table.width                = px(900),
-    heading.background.color   = "#f7f7f7",
-    column_labels.background.color = "#f0f0f0",
-    table.border.top.color     = "#cccccc",
-    table.border.bottom.color  = "#cccccc"
-  )
-
-# ── Save ──────────────────────────────────────────────────────────────────────
-
-png_out <- "results/figures/leaderboard_by_pitch.png"
-tryCatch(
-  { gtsave(tbl, png_out, vwidth = 1400, vheight = 900); cat("Saved", png_out, "\n") },
-  error = function(e) cat("PNG export skipped (install webshot2 for PNG):", conditionMessage(e), "\n")
-)
+save_png(tbl_dist, "results/figures/leaderboard_distortion.png")
