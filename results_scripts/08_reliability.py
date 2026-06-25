@@ -24,7 +24,7 @@ Path("results/figures").mkdir(parents=True, exist_ok=True)
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
-METRICS = ["disruption_tax", "distortion_tax", "selection_tax", "distortion_share"]
+METRICS = ["disruption_tax", "distortion_tax", "selection_tax"]
 METRIC_LABELS = {
     "disruption_tax":   "xRV Residual (Actual - Intended)",
     "distortion_tax":   "Distortion Tax",
