@@ -2,15 +2,23 @@
 outcome_analysis.py
 How swing outcomes shift as distortion / selection tax increases.
 
-The disruption tax = xRV(realized) - xRV(intended). To interpret correctly,
-we bin swings BY tax level and ask: what outcomes does high distortion produce?
+The disruption tax = xRV(realized) - xRV(intended). These are causal attribution
+metrics, not predictors. The right question is: when distortion/selection tax is
+large (most negative), do we see the expected outcome signatures?
+
+Two issues with BIP-conditional xwOBA (previous version):
+  1. Collider bias: conditioning on BIP selects out whiffs/fouls, which are the
+     worst-outcome results of heavy disruption. Remaining BIPs under high disruption
+     are survivorship cases, not a clean sample.
+  2. Direction: Q1 = lowest value = most negative = most disrupted. Labels must
+     reflect that, not "lowest/highest" which implies magnitude.
 
 Run from project root:
     .venv\\Scripts\\python.exe results_scripts\\outcome_analysis.py
 
 Outputs:
     results/figures/outcome_rates.png      -- outcome rates by tax quintile
-    results/figures/xwoba_relationship.png -- xwOBA on contact vs tax metrics
+    results/figures/xwoba_relationship.png -- xwOBA (all swings) vs tax metrics
 """
 
 import numpy as np
@@ -49,24 +57,26 @@ df["is_xbh"] = (
     & ((df["is_double"] == 1) | (df["is_triple"] == 1) | (df["is_home_run"] == 1))
 )
 
-# xwOBA for BIP
+# xwOBA for all swings — whiffs/fouls get 0 (worst outcome), BIP get linear weight.
+# Using 0 for non-contact avoids the collider bias of conditioning on BIP only.
 lw = pd.read_csv("results/linear_weights.csv").set_index("outcome_type")["lw"]
 bip = df["is_bip"] == 1
-xwoba = pd.Series(np.nan, index=df.index)
-xwoba.loc[bip & (df["is_home_run"] == 1)]                                              = lw["home_run"]
-xwoba.loc[bip & (df["is_triple"]   == 1) & ~(df["is_home_run"] == 1)]                 = lw["triple"]
-xwoba.loc[bip & (df["is_double"]   == 1) & ~(df["is_triple"] == 1)
-                                         & ~(df["is_home_run"] == 1)]                  = lw["double"]
-xwoba.loc[bip & (df["is_single"]   == 1) & ~(df["is_double"] == 1)
-                                         & ~(df["is_triple"] == 1)
-                                         & ~(df["is_home_run"] == 1)]                  = lw["single"]
-xwoba.loc[df["is_out_in_play"]]                                                         = lw["out_in_play"]
-df["xwoba"] = xwoba
+xwoba_all = pd.Series(0.0, index=df.index)   # default 0 (whiff / foul)
+xwoba_all.loc[bip & (df["is_home_run"] == 1)]                                           = lw["home_run"]
+xwoba_all.loc[bip & (df["is_triple"]   == 1) & ~(df["is_home_run"] == 1)]              = lw["triple"]
+xwoba_all.loc[bip & (df["is_double"]   == 1) & ~(df["is_triple"] == 1)
+                                              & ~(df["is_home_run"] == 1)]              = lw["double"]
+xwoba_all.loc[bip & (df["is_single"]   == 1) & ~(df["is_double"] == 1)
+                                              & ~(df["is_triple"] == 1)
+                                              & ~(df["is_home_run"] == 1)]              = lw["single"]
+xwoba_all.loc[df["is_out_in_play"]]                                                      = lw["out_in_play"]
+df["xwoba_all"] = xwoba_all
 
 # ── Figure 1: outcome rates by tax quintile ───────────────────────────────────
 #
-# The right question: given a distortion/selection level, what outcomes follow?
-# Bin swings by tax quintile; show whiff / foul / out-in-play / single / XBH rates.
+# Q1 = lowest tax value = most negative = MOST disrupted.
+# Q5 = least negative (near zero) = LEAST disrupted.
+# Expected pattern: Q1 (most disrupted) → more whiffs, fewer hits.
 
 OUTCOMES_STACKED = [
     ("Whiff",       "is_whiff",       "#c0392b"),
@@ -77,7 +87,14 @@ OUTCOMES_STACKED = [
 ]
 
 N_BINS   = 5
-BIN_LABS = ["Q1\n(lowest)", "Q2", "Q3", "Q4", "Q5\n(highest)"]
+# Q1 = most disruptive (most negative tax). Q5 = least disruptive.
+BIN_LABS = [
+    "Q1\n(most\ndisruptive)",
+    "Q2",
+    "Q3",
+    "Q4",
+    "Q5\n(least\ndisruptive)",
+]
 
 fig1, axes = plt.subplots(1, 2, figsize=(14, 5.5), sharey=False)
 fig1.patch.set_facecolor("white")
@@ -95,9 +112,8 @@ for ax, metric, col_label, title in [
 
     for outcome_label, col, color in OUTCOMES_STACKED:
         rates = df.groupby("_bin")[col].mean().reindex(range(N_BINS)).fillna(0).values
-        bars  = ax.bar(range(N_BINS), rates, bar_w, bottom=bottoms,
-                       color=color, label=outcome_label, edgecolor="white", linewidth=0.4)
-        # Label if segment is wide enough to read
+        ax.bar(range(N_BINS), rates, bar_w, bottom=bottoms,
+               color=color, label=outcome_label, edgecolor="white", linewidth=0.4)
         for b_idx, (rate, bot) in enumerate(zip(rates, bottoms)):
             if rate > 0.04:
                 ax.text(b_idx, bot + rate / 2, f"{rate:.1%}",
@@ -105,7 +121,6 @@ for ax, metric, col_label, title in [
                         color="white", fontweight="bold")
         bottoms += rates
 
-    # Bin-level N annotation above bars
     for b_idx in range(N_BINS):
         n = (df["_bin"] == b_idx).sum()
         ax.text(b_idx, bottoms[b_idx] + 0.005, f"n={n:,}",
@@ -121,7 +136,6 @@ for ax, metric, col_label, title in [
     ax.spines[["top", "right"]].set_visible(False)
     ax.grid(axis="y", alpha=0.25, linestyle="--")
 
-# Shared legend
 handles = [mpatches.Patch(color=c, label=l) for l, _, c in OUTCOMES_STACKED]
 fig1.legend(handles=handles, loc="lower center", ncol=5,
             fontsize=9, frameon=False, bbox_to_anchor=(0.5, -0.04))
@@ -136,9 +150,13 @@ fig1.savefig(out1, dpi=150, bbox_inches="tight", facecolor="white")
 plt.close(fig1)
 print(f"Saved {out1}")
 
-# ── Figure 2: xwOBA on contact vs tax metrics ─────────────────────────────────
+# ── Figure 2: xwOBA (all swings, not BIP-conditional) vs tax metrics ──────────
+#
+# Previous version conditioned on BIP, creating collider bias.
+# Whiffs and fouls under high distortion were dropped — exactly the worst outcomes.
+# This version assigns xwOBA = 0 to all non-BIP swings (whiff / foul = bad outcome)
+# so the full distribution is visible.
 
-bip_df = df[bip].copy()
 N_BINS2 = 10
 
 fig2, axes2 = plt.subplots(1, 2, figsize=(13, 5))
@@ -148,14 +166,15 @@ for ax, metric, label, color in [
     (axes2[0], "distortion_tax", "Distortion Tax", "#d73027"),
     (axes2[1], "selection_tax",  "Selection Tax",  "#2166ac"),
 ]:
-    bip_df["_bin"] = pd.qcut(bip_df[metric], q=N_BINS2, labels=False, duplicates="drop")
+    df["_bin"] = pd.qcut(df[metric], q=N_BINS2, labels=False, duplicates="drop")
     summary = (
-        bip_df.groupby("_bin")
+        df.groupby("_bin")
         .agg(
-            mid    =(metric,  "mean"),
-            mean_xw=("xwoba", "mean"),
-            se_xw  =("xwoba", lambda x: sem(x, nan_policy="omit")),
-            n      =("xwoba", "count"),
+            mid      =(metric,      "mean"),
+            mean_xw  =("xwoba_all", "mean"),
+            se_xw    =("xwoba_all", lambda x: sem(x, nan_policy="omit")),
+            contact  =("is_contact","mean"),
+            n        =("xwoba_all", "count"),
         )
         .reset_index()
     )
@@ -168,22 +187,36 @@ for ax, metric, label, color in [
     )
     ax.plot(summary["mid"], summary["mean_xw"],
             "o-", color=color, linewidth=2, markersize=6,
-            markerfacecolor="white", markeredgewidth=2)
+            markerfacecolor="white", markeredgewidth=2, label="xwOBA (all swings)")
+
+    # Also overlay contact rate on a secondary y-axis
+    ax2r = ax.twinx()
+    ax2r.plot(summary["mid"], summary["contact"],
+              "s--", color=color, linewidth=1.2, markersize=4,
+              alpha=0.5, label="Contact rate")
+    ax2r.set_ylabel("Contact rate", fontsize=9, color=color, alpha=0.7)
+    ax2r.tick_params(axis="y", labelcolor=color, labelsize=8)
+    ax2r.set_ylim(0, 1)
+    ax2r.yaxis.set_major_formatter(plt.FuncFormatter(lambda y, _: f"{y:.0%}"))
 
     for _, r in summary.iterrows():
         ax.text(r["mid"], r["mean_xw"] + 0.003, f"n={int(r['n']):,}",
                 ha="center", va="bottom", fontsize=6.5, color="#666")
 
-    ax.set_xlabel(label, fontsize=11)
-    ax.set_ylabel("Mean xwOBA (ball in play)", fontsize=11)
-    ax.set_title(f"Contact Quality vs {label}", fontsize=12, fontweight="bold")
+    ax.set_xlabel(f"{label}  (most negative = most disrupted)", fontsize=10)
+    ax.set_ylabel("Mean xwOBA (all swings, whiff/foul = 0)", fontsize=10)
+    ax.set_title(f"Swing Quality vs {label}", fontsize=12, fontweight="bold")
     ax.spines[["top", "right"]].set_visible(False)
     ax.grid(True, alpha=0.25, linestyle="--")
-    ax.axhline(0, color="#aaa", lw=0.8, linestyle=":")
+
+    lines1, labs1 = ax.get_legend_handles_labels()
+    lines2, labs2 = ax2r.get_legend_handles_labels()
+    ax.legend(lines1 + lines2, labs1 + labs2, fontsize=8, frameon=False, loc="upper left")
 
 fig2.suptitle(
-    "xwOBA on Contact vs Distortion / Selection Tax  ·  BIP only  ·  2023–2025",
-    fontsize=12, fontweight="bold", y=1.01,
+    "Swing Quality vs Distortion / Selection Tax  ·  All Swings  ·  2023–2025\n"
+    "(xwOBA = 0 for whiffs/fouls; no BIP conditioning)",
+    fontsize=11, fontweight="bold", y=1.02,
 )
 fig2.tight_layout()
 out2 = "results/figures/xwoba_relationship.png"

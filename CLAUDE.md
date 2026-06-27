@@ -207,6 +207,8 @@ The treatment coefficients `a_x, a_z` per axis are the causal leverage: how many
 
 #### 2. Outcome models — three channels
 
+Outcome models use **actual plate location** (plate_x, plate_z). Spatial disruption is priced through the Option B counterfactual (`zero_spatial=True` substitutes `x_proj`/`z_proj` for `plate_x`/`plate_z`) rather than a decomposed-location formula. The decomposed-location approach (Option C) was reverted: `pc150_dev_z` absorbs gravity and is always negative, so the regression coefficient was backward and `spatial_distortion_tax` came out positive for every pitch.
+
 - `bip_model`: logistic P(BIP | swing) ~ angular deviations + plate_x + plate_z + balls + strikes (HC1 SEs)
 - `foul_model`: logistic P(foul | not BIP) ~ same predictors, fit on non-BIP swings only
 - `xwoba_model`: OLS xwOBAcon ~ same predictors, BIP only
@@ -220,30 +222,32 @@ P(whiff) = (1 − P(BIP)) × (1 − P(foul | not BIP))
 xRV = P(BIP)×E[xwOBA|BIP] + P(foul)×foul_rv[count] + P(whiff)×whiff_rv[count]
 ```
 
-#### 3. Disruption tax (predict-twice counterfactual)
+#### 3. Disruption tax (three-scenario counterfactual, Option B+C)
 
-- `xrv_realized`: predict xRV at the realized angular deviations
-- `xrv_intended`: predict xRV with all angular deviations set to 0 (the counterfactual intended swing)
-- `disruption_tax = xrv_realized − xrv_intended` (negative = pitcher cost batter runs)
-
-#### 4. Distortion attribution (squared-norm decomposition)
-
-Per angular axis m:
-```
-distortion_dev_m = a_x_m × pc_dev_x + a_z_m × pc_dev_z   (movement-caused component)
-selection_dev_m  = {metric}_dev_m − distortion_dev_m        (residual)
-```
+Three `_xrv_from_shape` evaluations:
+- `xrv_realized` (`zero_angular=False, zero_spatial=False`): actual swing + actual pitch location
+- `xrv_spatial` (`zero_angular=True, zero_spatial=False`): perfect swing but pitch still deviates from projected location
+- `xrv_intended` (`zero_angular=True, zero_spatial=True`): perfect swing + ball at projected location (old counterfactual used `plate_x/plate_z` instead — this is Option B's change)
 
 ```
-distortion_share = ||distortion_dev||² / ||total_dev||²
+disruption_tax     = xrv_realized − xrv_intended
+spatial_distortion = xrv_spatial  − xrv_intended   (pure location displacement)
+angular_disruption = xrv_realized − xrv_spatial     (swing-plane disruption on top)
 ```
 
-**Why squared-norm:** The raw L2-norm ratio (`dist_norm / (dist_norm + sel_norm)`) is wrong when distortion and selection components point in opposite directions — the denominator becomes larger than the total. Squared-norm decomposition gives a clean [0,1] proportion and is algebraically correct.
+#### 4. Distortion attribution
+
+Angular disruption is split into distortion (movement-caused) vs. selection via squared-norm decomposition (same as before). Spatial disruption is fully attributed to distortion (it is 100% movement-caused by construction):
 
 ```
-distortion_tax = disruption_tax × distortion_share
-selection_tax  = disruption_tax × (1 − distortion_share)
+angular_distortion_share = ||distortion_dev||² / ||total_dev||²   (clipped to [0,1])
+distortion_tax = spatial_distortion + angular_disruption × angular_distortion_share
+selection_tax  = angular_disruption × (1 − angular_distortion_share)
 ```
+
+`distortion_share` (the final column) = `distortion_tax / disruption_tax`, clipped to [0, 1].
+
+**Why squared-norm for the angular component:** The raw L2-norm ratio (`dist_norm / (dist_norm + sel_norm)`) is wrong when distortion and selection components point in opposite directions. Squared-norm decomposition gives a clean [0,1] proportion.
 
 #### 5. Indirect effect (analytical, product-of-coefficients)
 
@@ -334,8 +338,17 @@ The run-value cost to the batter from having their swing shape disturbed. Comput
 
 ## Key invariants
 
-- `disruption_tax = xRV(realized) − xRV(intended)` where "intended" means all angular deviations = 0. Negative = pitcher cost batter runs.
-- `distortion_share` uses squared-norm decomposition: `||distortion_dev||² / ||total_dev||²`, giving a clean [0,1] proportion. The raw L2-norm ratio (`dist_norm / (dist_norm + sel_norm)`) is wrong when components point in opposite directions.
+- `disruption_tax = xRV(realized) − xRV(intended)` where "realized" = actual deviations + actual pc_dev, "intended" = zero angular deviations + zero pc_dev (ball at projected plate location). Negative = pitcher cost batter runs.
+- Three-scenario decomposition:
+  - `xrv_realized` — actual deviations, actual pc_dev
+  - `xrv_spatial` — zero angular deviations, actual pc_dev (spatial disruption only)
+  - `xrv_intended` — zero angular deviations, zero pc_dev (ball where batter expected it)
+  - `spatial_distortion_tax = xrv_spatial − xrv_intended` (pure location displacement cost)
+  - `angular_disruption = xrv_realized − xrv_spatial` (swing-plane cost on top of spatial)
+  - `distortion_tax = spatial_distortion_tax + angular_disruption × angular_distortion_share`
+  - `selection_tax = angular_disruption × (1 − angular_distortion_share)`
+- `distortion_share` is defined post-hoc as `distortion_tax / disruption_tax`, clipped to [0, 1]. The angular component's share uses squared-norm decomposition: `||distortion_dev||² / ||total_dev||²`.
+- Outcome models use `plate_x + plate_z` (actual location, not decomposed). Spatial disruption is priced by the Option B counterfactual: `zero_spatial=True` substitutes `x_proj`/`z_proj` into the `plate_x`/`plate_z` slots so the model correctly evaluates "ball at projected location." Decomposed location (Option C) was reverted — `pc150_dev_z` always negative (includes gravity) caused backward regression signs.
 - `foul_rv` differs from `whiff_rv` at 2-strike counts: foul at 2K → delta = 0 (count stays); whiff at 2K → delta = −ERV(b, 2) (strikeout).
 - The pitcher_id sentinel (`-1`) in `predict_intended` zeros out pitcher random effects, leaving only batter RE in the intention baseline. Pitcher handedness (`pitcher_throws_L`) is a fixed effect and must still be populated.
 
@@ -345,7 +358,7 @@ The run-value cost to the batter from having their swing shape disturbed. Comput
 
 | File | Contents |
 |------|----------|
-| `results/xrv_causal.parquet` | Per-swing disruption/distortion/selection tax |
+| `results/xrv_causal.parquet` | Per-swing disruption/distortion/selection/spatial_distortion tax |
 | `results/distortion_pitcher.csv` | Aggregated by pitcher (≥50 swings) |
 | `results/distortion_batter.csv` | Aggregated by batter (≥50 swings) |
 | `models/intention_result.joblib` | Phase A Bambi models + idata |

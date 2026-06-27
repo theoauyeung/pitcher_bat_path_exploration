@@ -41,6 +41,8 @@ python results_scripts/05_trajectory_plot.py       # pitch trajectory plots with
 python results_scripts/06_kinematic_diagram.py     # annotated batter-view kinematic diagrams
 python results_scripts/07_intention_diagnostics.py # Phase A model diagnostics (distributions, count/zone effects)
 python results_scripts/08_reliability.py           # split-half and year-over-year reliability of distortion tax
+python results_scripts/outcome_analysis.py         # outcome rates and swing quality by distortion/selection tax quintile
+python results_scripts/causal_chain.py             # mechanism validation, pitcher type quadrant, pitch type profiles
 ```
 
 ---
@@ -130,7 +132,7 @@ Core packages: `bambi`, `pymc`, `statsmodels`, `xgboost`, `pandas`, `numpy`, `ma
 **Annotated kinematic diagrams** (`results_scripts/06_kinematic_diagram.py`):
 
 Pulled from the following videos: (https://baseballsavant.mlb.com/sporty-videos?playId=fe30b4fe-120e-4f6c-a258-a624bc52452f, 
-https://baseballsavant.mlb.com/sporty-videos?playId=84f68d2c-ea0d-351c-b752-2d4aec739924, https://baseballsavant.mlb.com/sporty-videos?playId=cf50242d-6c5b-30f4-a051-300f33655ef9, https://baseballsavant.mlb.com/sporty-videos?playId=39e968ef-398c-3112-8856-75799afc21df)
+https://baseballsavant.mlb.com/sporty-videos?playId=84f68d2c-ea0d-351c-b752-2d4aec739924, https://baseballsavant.mlb.com/sporty-videos?playId=cf50242d-6c5b-30f4-a051-300f33655ef9, https://baseballsavant.mlb.com/sporty-videos?playId=39e968ef-398c-3112-8856-75799afc21df, https://baseballsavant.mlb.com/sporty-videos?playId=0c3f33b2-cac0-3bdc-b0bb-c4771a8ebe66, https://baseballsavant.mlb.com/sporty-videos?playId=4a531f99-1294-308c-9ff7-0619334db309)
 
 Each figure is a two-panel broadcast card: game screenshot with arrow callout (left) + dark metrics panel (right). The **DISRUPTION ANALYSIS** section shows:
 

@@ -230,12 +230,14 @@ def run(
     print("Mediator models done.")
 
     # ── 4. Phase B: outcome models ────────────────────────────────────────────────
-    # bip_model:   logistic P(BIP) ~ angular deviations + location + count
+    # bip_model:   logistic P(BIP) ~ angular_devs + x_proj + z_proj + pc_dev_x + pc_dev_z + count
     # foul_model:  logistic P(foul | not BIP) ~ same predictors, non-BIP swings only
     # xwoba_model: OLS xwOBAcon ~ same, BIP only
+    # Location decomposed into projected target + spatial deviation so the model
+    # prices breaking-ball spatial disruption directly (see 03_causal_models.py §2).
     # whiff_rv/foul_rv: count-transition values from count_values.csv
     print("\nFitting outcome models...")
-    bip_model, foul_model, xwoba_model, _ = _B.fit_outcome_models(swings)
+    bip_model, foul_model, xwoba_model, _ = _B.fit_outcome_models(swings, commit_ms=commit_ms)
     whiff_rv = whiff_rv_from_count_values(count_values_path)
     foul_rv  = foul_rv_from_count_values(count_values_path)
     print("Outcome models done.")
@@ -269,7 +271,8 @@ def run(
     # ── 8. Save ───────────────────────────────────────────────────────────────────
     id_cols = ["batter_id", "pitcher_id", "game_pk", "at_bat_number", "pitch_number",
                "balls", "strikes", "pitch_type"]
-    tax_cols = ["disruption_tax", "distortion_tax", "selection_tax", "distortion_share"]
+    tax_cols = ["disruption_tax", "spatial_distortion_tax",
+                "distortion_tax", "selection_tax", "distortion_share"]
     save_cols = [c for c in id_cols + tax_cols if c in results.columns]
 
     results[save_cols].to_parquet("results/xrv_causal.parquet", index=False)
@@ -283,6 +286,7 @@ def run(
             .agg(
                 n_swings=("disruption_tax", "size"),
                 mean_disruption_tax=("disruption_tax", "mean"),
+                mean_spatial_distortion_tax=("spatial_distortion_tax", "mean"),
                 mean_distortion_tax=("distortion_tax", "mean"),
                 mean_selection_tax=("selection_tax", "mean"),
                 mean_distortion_share=("distortion_share", "mean"),

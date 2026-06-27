@@ -1,57 +1,54 @@
 """
 Phase B: run-value mediation models.
 
-DAG:
-  post-commit movement  →  angular deviation  →  run value
-      (treatment)            (mediator, §A)        (outcome)
+DAG (two disruption channels):
+  post-commit movement  →  angular deviation  →  run value   (angular / mediated path)
+  post-commit movement  →  spatial displacement →  run value  (spatial / direct path)
+      (treatment)                                  (outcome)
 
-The total effect of post-commit movement on run value decomposes into:
-  - indirect (distortion): the path mediated by measurable swing shape change
-  - direct (residual, including selection): everything else
+Breaking balls expose a limitation of the angular-only model: a batter can execute
+their intended swing plane perfectly yet miss because the ball crossed the plate 8"
+from where they projected it.  The redesign addresses this with two changes:
+
+  Option B — changed counterfactual
+    Old: xRV(intended) = predict(zero angular devs, ACTUAL plate location)
+    New: xRV(intended) = predict(zero angular devs, zero post-commit movement)
+         → ball stays at the projected location (pc{ms}_x_proj, pc{ms}_z_proj),
+           not the actual plate_x / plate_z.
+    This directly prices the spatial shift caused by late movement.
+
 
 Three components
 ────────────────
-1. Mediator models (one per angular deviation axis)
-     dev ~ pc{ms}_dev_x + pc{ms}_dev_z          ← post-commit treatment
-           + pc{ms}_x_proj + pc{ms}_z_proj       ← pre-commit projected plate location
-           + release_speed + balls + strikes      ← pitch and count controls
-           + offset_y_ms                          ← timing (removes arc-sampling artifact)
-           + (1 | batter_id)                      ← batter grouping
-   LinearMixedLM (statsmodels). Treatment coefficients (a_x, a_z) per deviation axis
-   are the causal leverage: how much post-commit movement shifts each swing dimension.
+1. Mediator models (one per angular deviation axis) — unchanged
+     dev ~ pc{ms}_dev_x + pc{ms}_dev_z + x_proj + z_proj
+           + release_speed + balls + strikes + offset_y_ms
+           + (1 | batter_id)
 
-2. Outcome models — three channels (foul balls separated from whiffs)
-     P(BIP):              logistic on deviation + plate location + count
-     P(foul | not BIP):   logistic on same, fit on non-BIP swings only
-     xwOBAcon:            linear on same, BIP only
-   Composite: xRV = P(BIP)×E[xwOBA|BIP] + P(foul)×foul_rv[count] + P(whiff)×whiff_rv[count]
-   where P(foul) = (1−P(BIP))×P(foul|not BIP), P(whiff) = (1−P(BIP))×(1−P(foul|not BIP)).
-   Foul run value differs from whiff: fouls are count-neutral at 2 strikes, advance the
-   count at 0-1 strikes. Conflating them biases xRV at moderate disruption levels.
+2. Outcome models — three channels, actual plate location
+     P(BIP):            logistic on angular_devs + plate_x + plate_z + count
+     P(foul | not BIP): logistic on same, non-BIP swings only
+     xwOBAcon:          linear on same, BIP only
 
-3. Disruption tax and distortion attribution
-     xrv_realized  = predict(realized swing shape)
-     xrv_intended  = predict(intended_{metric} from Phase A, same controls)
-     disruption_tax = xrv_realized − xrv_intended  [negative = pitcher cost batter runs]
+3. Disruption tax — three-scenario predict-twice
+     xrv_realized    = predict(actual_devs,  plate_x=actual,  plate_z=actual)
+     xrv_spatial     = predict(zero_devs,    plate_x=actual,  plate_z=actual)
+     xrv_intended    = predict(zero_devs,    plate_x=x_proj,  plate_z=z_proj)
 
-   Distortion share per swing:
-     distortion_dev_m  = a_x_m × pc_dev_x + a_z_m × pc_dev_z   (mediator prediction)
-     total_dev_m       = {metric}_dev
-     distortion_share  = ||distortion_dev|| / (||distortion_dev|| + ||selection_dev||)
-     where selection_dev = total_dev − distortion_dev
+     disruption_tax       = xrv_realized − xrv_intended
+     spatial_distortion   = xrv_spatial  − xrv_intended  (location shift, perfect swing)
+     angular_disruption   = xrv_realized − xrv_spatial   (deviation on top of shift)
+
+   Angular distortion share (from mediator models):
+     distortion_dev_m = a_x_m × pc_dev_x + a_z_m × pc_dev_z
+     angular_distortion_share = ||distortion_dev||² / ||total_dev||²  (clipped to [0,1])
 
    Final:
-     distortion_tax = disruption_tax × distortion_share
-     selection_tax  = disruption_tax × (1 − distortion_share)
+     distortion_tax = spatial_distortion + angular_disruption × angular_distortion_share
+     selection_tax  = angular_disruption × (1 − angular_distortion_share)
+     distortion_share = distortion_tax / disruption_tax  (clipped to [0,1])
 
-Indirect effect (product-of-coefficients):
-  For each deviation axis m and each outcome channel c:
-     indirect_{m,c} = a_{x→m} × ∂c/∂m  (gradient from outcome model, evaluated at realized shape)
-  Summed across axes and channels gives the analytical indirect-effect estimate.
-  Consistent with the counterfactual tax under linearity; differ only through nonlinearity in
-  the contact channel.
-
-Negative-control check built in: filter to FF (four-seam fastballs) with dev_total < threshold
+Negative-control check built in: filter to FF with dev_total < threshold
 and verify that disruption_tax ≈ 0.
 """
 
@@ -65,11 +62,6 @@ import statsmodels.api as sm
 
 ANGULAR_DEVS = ("vert_attack_angle_dev", "horz_attack_angle_dev", "swing_path_tilt_dev")
 ANGULAR_RESP = ("vert_attack_angle", "horz_attack_angle", "swing_path_tilt")
-
-_DEVIATION_TERMS  = " + ".join(ANGULAR_DEVS)
-_LOCATION_TERMS   = "plate_x + plate_z + balls + strikes"
-_OUTCOME_CONTROLS = f"{_DEVIATION_TERMS} + {_LOCATION_TERMS}"
-
 
 def _pc(commit_ms, suffix):
     return f"pc{commit_ms}_{suffix}"
@@ -119,37 +111,36 @@ def fit_mediator_models(df, commit_ms=150):
 
 # ── 2. Outcome models ───────────────────────────────────────────────────────────
 
-def fit_outcome_models(df):
+def fit_outcome_models(df, commit_ms=150):
     """Fit all outcome components. Returns (bip_model, foul_model, xwoba_model, whiff_rv_table).
 
-    bip_model      — logistic P(BIP | swing) ~ angular deviations + pitch controls (HC1 SEs)
-    foul_model     — logistic P(foul | not BIP) ~ same predictors, fit on non-BIP swings
-    xwoba_model    — OLS xwOBAcon ~ same predictors, BIP only (fouls/whiffs dropped via NaN)
-    whiff_rv_table — empirical mean delta_run_exp per (balls, strikes) cell on whiffs
+    Outcome models use actual plate_x / plate_z (correctly estimated location effect).
+    Spatial disruption is priced in the counterfactual (_xrv_from_shape with zero_spatial=True
+    substitutes x_proj/z_proj for plate_x/plate_z), not through a decomposed-location formula.
+
+    Decomposed location (Option C) was reverted: pc150_dev_z absorbs gravity and is always
+    negative, so the regression coefficient is backward relative to causal direction.
     """
+    deviation_terms = " + ".join(ANGULAR_DEVS)
+    controls = (
+        f"{deviation_terms}"
+        f" + plate_x + plate_z"
+        f" + balls + strikes"
+    )
+    needed = list(ANGULAR_DEVS) + ["plate_x", "plate_z", "balls", "strikes"]
+
     d = df.copy()
     if "is_foul" not in d.columns:
-        # foul: made contact but not a ball in play
         d["is_foul"] = ((d["is_contact"] == 1) & (d["is_bip"] != 1)).astype(int)
 
-    d_bip = d[list(ANGULAR_DEVS) + ["is_bip", "plate_x", "plate_z",
-                                     "balls", "strikes"]].dropna()
-    bip_model = smf.logit(f"is_bip ~ {_OUTCOME_CONTROLS}", d_bip).fit(
-        cov_type="HC1", disp=False
-    )
+    d_bip = d[needed + ["is_bip"]].dropna()
+    bip_model = smf.logit(f"is_bip ~ {controls}", d_bip).fit(cov_type="HC1", disp=False)
 
-    # P(foul | not BIP): fit on non-BIP swings so the model is conditional on not going in play
-    d_foul = d.loc[d["is_bip"] == 0,
-                   list(ANGULAR_DEVS) + ["is_foul", "plate_x", "plate_z",
-                                          "balls", "strikes"]].dropna()
-    foul_model = smf.logit(f"is_foul ~ {_OUTCOME_CONTROLS}", d_foul).fit(
-        cov_type="HC1", disp=False
-    )
+    d_foul = d.loc[d["is_bip"] == 0, needed + ["is_foul"]].dropna()
+    foul_model = smf.logit(f"is_foul ~ {controls}", d_foul).fit(cov_type="HC1", disp=False)
 
-    d_xwoba = df.loc[df["is_bip"] == 1,
-                     list(ANGULAR_DEVS) + ["xwoba", "plate_x", "plate_z",
-                                            "balls", "strikes"]].dropna()
-    xwoba_model = smf.ols(f"xwoba ~ {_OUTCOME_CONTROLS}", d_xwoba).fit(cov_type="HC1")
+    d_xwoba = df.loc[df["is_bip"] == 1, needed + ["xwoba"]].dropna()
+    xwoba_model = smf.ols(f"xwoba ~ {controls}", d_xwoba).fit(cov_type="HC1")
 
     whiffs = df[(df["is_swing"] == 1) & (df["is_whiff"] == 1) &
                 df["delta_run_exp"].notna()]
@@ -162,20 +153,35 @@ def fit_outcome_models(df):
 # ── 3. Disruption tax ───────────────────────────────────────────────────────────
 
 def _xrv_from_shape(df, bip_model, foul_model, xwoba_model, whiff_rv, foul_rv,
-                    use_zero_devs=False):
-    """Predict per-swing xRV given a swing shape.
+                    commit_ms=150, zero_angular=False, zero_spatial=False):
+    """Predict per-swing xRV for one of three counterfactual scenarios.
 
-    use_zero_devs=True:  evaluate at the intended swing (all angular deviations = 0).
-    use_zero_devs=False: evaluate at the realized swing (actual angular deviations).
+    zero_angular=False, zero_spatial=False → realized xRV (actual everything)
+    zero_angular=True,  zero_spatial=True  → intended xRV:
+        ball at projected location (pc_dev=0), perfect swing (angular_dev=0).
+        This is the 'what if the ball stayed where the batter expected it to?' baseline.
+    zero_angular=True,  zero_spatial=False → spatial-only xRV:
+        actual post-commit movement, perfect swing angles.
+        Isolates the cost of spatial displacement alone.
 
     Three-channel formula:
       P(foul) = (1 − P(BIP)) × P(foul | not BIP)
       P(whiff) = (1 − P(BIP)) × (1 − P(foul | not BIP))
       xRV = P(BIP)×E[xwOBA|BIP] + P(foul)×foul_rv[count] + P(whiff)×whiff_rv[count]
     """
-    score = df[["plate_x", "plate_z", "balls", "strikes"]].copy()
+    prefix = f"pc{commit_ms}"
+    x_proj = f"{prefix}_x_proj"
+    z_proj = f"{prefix}_z_proj"
+
+    # Outcome models use plate_x / plate_z. When zero_spatial=True, substitute the
+    # pre-commit projected location — Option B counterfactual ("ball stayed where
+    # the batter expected it"). This correctly prices spatial disruption through the
+    # same plate-location regression used at training time.
+    score = df[["balls", "strikes"]].copy()
+    score["plate_x"] = df[x_proj] if zero_spatial else df["plate_x"]
+    score["plate_z"] = df[z_proj] if zero_spatial else df["plate_z"]
     for dev in ANGULAR_DEVS:
-        score[dev] = 0.0 if use_zero_devs else df[dev]
+        score[dev] = 0.0 if zero_angular else df[dev]
 
     p_bip            = bip_model.predict(score)
     p_foul_given_not = foul_model.predict(score)
@@ -199,48 +205,83 @@ def _xrv_from_shape(df, bip_model, foul_model, xwoba_model, whiff_rv, foul_rv,
 
 def disruption_tax_split(df, bip_model, foul_model, xwoba_model, whiff_rv, foul_rv,
                          mediator_models, commit_ms=150):
-    """Full disruption tax with distortion/selection decomposition.
+    """Full disruption tax with two-channel distortion/selection decomposition.
 
-    disruption_tax:   xRV(realized) − xRV(intended)  [negative = pitcher cost batter runs]
-    distortion_share: fraction of angular deviation variance explained by post-commit movement
-    distortion_tax:   disruption_tax × distortion_share
-    selection_tax:    disruption_tax × (1 − distortion_share)
+    Three xRV scenarios:
+      xrv_realized  — actual angular deviations + actual post-commit movement
+      xrv_spatial   — zero angular deviations + actual post-commit movement
+                       (perfect swing, ball at actual plate location)
+      xrv_intended  — zero angular deviations + zero post-commit movement
+                       (perfect swing, ball at projected location = batter's information)
 
-    Returns df with the four columns above added.
+    Decomposition:
+      disruption_tax     = xrv_realized − xrv_intended  [negative = pitcher advantage]
+      spatial_distortion = xrv_spatial  − xrv_intended  spatial displacement alone
+      angular_disruption = xrv_realized − xrv_spatial   angular deviation on top of shift
+
+    Angular distortion share (from mediator models, clipped to [0, 1]):
+      distortion_dev_m = a_x_m × pc_dev_x + a_z_m × pc_dev_z
+      angular_distortion_share = ||distortion_dev||² / ||total_dev||²
+
+    Final outputs:
+      distortion_tax = spatial_distortion + angular_disruption × angular_distortion_share
+      selection_tax  = angular_disruption × (1 − angular_distortion_share)
+      distortion_share = distortion_tax / disruption_tax  (clipped to [0, 1])
+
+    Note: disruption_tax = distortion_tax + selection_tax is preserved exactly.
     """
     prefix    = f"pc{commit_ms}"
     dev_x_col = f"{prefix}_dev_x"
     dev_z_col = f"{prefix}_dev_z"
 
-    # ── disruption tax (predict-twice) ────────────────────────────────────────
-    xrv_realized = _xrv_from_shape(df, bip_model, foul_model, xwoba_model, whiff_rv, foul_rv,
-                                    use_zero_devs=False)
-    xrv_intended = _xrv_from_shape(df, bip_model, foul_model, xwoba_model, whiff_rv, foul_rv,
-                                    use_zero_devs=True)
-    tax = (xrv_realized - xrv_intended).rename("disruption_tax")
+    args = (df, bip_model, foul_model, xwoba_model, whiff_rv, foul_rv)
 
-    # ── distortion attribution ────────────────────────────────────────────────
+    xrv_realized = _xrv_from_shape(*args, commit_ms=commit_ms,
+                                    zero_angular=False, zero_spatial=False)
+    xrv_spatial  = _xrv_from_shape(*args, commit_ms=commit_ms,
+                                    zero_angular=True,  zero_spatial=False)
+    xrv_intended = _xrv_from_shape(*args, commit_ms=commit_ms,
+                                    zero_angular=True,  zero_spatial=True)
+
+    disruption_tax     = xrv_realized - xrv_intended
+    spatial_distortion = xrv_spatial  - xrv_intended
+    angular_disruption = xrv_realized - xrv_spatial
+
+    # ── angular distortion share (mediator attribution) ───────────────────────
     attr_cols = {}
     for dev_col, model in mediator_models.items():
         a_x = model.params.get(dev_x_col, 0.0)
         a_z = model.params.get(dev_z_col, 0.0)
-        distortion = a_x * df[dev_x_col] + a_z * df[dev_z_col]
-        attr_cols[f"distortion_dev_{dev_col}"] = distortion
-        attr_cols[f"selection_dev_{dev_col}"]  = df[dev_col] - distortion
+        dist_dev = a_x * df[dev_x_col] + a_z * df[dev_z_col]
+        attr_cols[f"distortion_dev_{dev_col}"] = dist_dev
+        attr_cols[f"selection_dev_{dev_col}"]  = df[dev_col] - dist_dev
 
     attr = pd.DataFrame(attr_cols, index=df.index)
-    # Squared-norm share: proportion of total deviation variance attributable to
-    # post-commit movement. Avoids the triangle-inequality problem (dist_norm +
-    # sel_norm ≠ total_norm when the two components point in opposite directions).
     distortion_sq = sum(attr[f"distortion_dev_{d}"] ** 2 for d in ANGULAR_DEVS)
     total_sq      = sum(df[d] ** 2 for d in ANGULAR_DEVS)
-    distortion_share = np.where(total_sq > 1e-8, distortion_sq / total_sq, np.nan)
+    angular_distortion_share = np.where(
+        total_sq > 1e-8,
+        np.clip(distortion_sq / total_sq, 0.0, 1.0),
+        np.nan,
+    )
+
+    distortion_tax = spatial_distortion + angular_disruption * angular_distortion_share
+    selection_tax  = angular_disruption * (1 - angular_distortion_share)
+
+    # distortion_share: fraction of total disruption attributable to movement.
+    # Defined post-hoc so it always satisfies distortion_tax + selection_tax = disruption_tax.
+    distortion_share = np.where(
+        disruption_tax.abs() > 1e-8,
+        np.clip(distortion_tax / disruption_tax, 0.0, 1.0),
+        np.nan,
+    )
 
     out = df.copy()
-    out["disruption_tax"]   = tax
-    out["distortion_share"] = distortion_share
-    out["distortion_tax"]   = out["disruption_tax"] * out["distortion_share"]
-    out["selection_tax"]    = out["disruption_tax"] * (1 - out["distortion_share"])
+    out["disruption_tax"]        = disruption_tax
+    out["spatial_distortion_tax"] = spatial_distortion
+    out["distortion_tax"]        = distortion_tax
+    out["selection_tax"]         = selection_tax
+    out["distortion_share"]      = distortion_share
     return out
 
 
