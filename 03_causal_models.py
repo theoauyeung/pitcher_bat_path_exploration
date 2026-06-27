@@ -56,6 +56,7 @@ import numpy as np
 import pandas as pd
 import statsmodels.formula.api as smf
 import statsmodels.api as sm
+from scipy.special import expit
 
 
 # ── Column conventions ──────────────────────────────────────────────────────────
@@ -282,6 +283,7 @@ def disruption_tax_split(df, bip_model, foul_model, xwoba_model, whiff_rv, foul_
     out["distortion_tax"]        = distortion_tax
     out["selection_tax"]         = selection_tax
     out["distortion_share"]      = distortion_share
+    out["_xrv_intended"]         = xrv_intended.values   # internal; used by compute_decision_cost
     return out
 
 
@@ -401,3 +403,164 @@ def positive_control_check(df_with_tax, dev_total_col="pc150_dev_total",
     print("\nPositive control — distortion tax by pitch type (sorted by post-commit deviation):")
     print(agg.to_string(float_format="{:.4f}".format))
     return agg
+
+
+# ── 6. Physical miss models ─────────────────────────────────────────────────────
+
+def fit_miss_models(df, commit_ms=150):
+    """Fit physical bat-to-ball miss models predicting miss from post-commit movement.
+
+    Whiff model:   ball_bat_miss (inches) on whiffs where Hawk-Eye measured it (~91%)
+    Contact model: sqrt(offset_z_in² + offset_x_in²) on contacts (|offset_x_in| ≤ 20)
+    miss_rv_slope: d(delta_run_exp)/d(inch_contact_miss), used to convert miss to runs
+
+    Returns (whiff_miss_model, contact_miss_model, miss_rv_slope).
+    miss_rv_slope is negative: more miss → fewer runs for batter.
+    """
+    prefix = f"pc{commit_ms}"
+    dev_x  = f"{prefix}_dev_x"
+    dev_z  = f"{prefix}_dev_z"
+    x_proj = f"{prefix}_x_proj"
+    z_proj = f"{prefix}_z_proj"
+
+    dev_terms = " + ".join(ANGULAR_DEVS)
+    rhs    = f"{dev_x} + {dev_z} + {x_proj} + {z_proj} + {dev_terms} + balls + strikes"
+    needed = [dev_x, dev_z, x_proj, z_proj] + list(ANGULAR_DEVS) + ["balls", "strikes"]
+
+    # Whiff model: ball_bat_miss measured on ~91% of whiff rows
+    d_w = df.loc[
+        (df["is_whiff"] == 1) & df["ball_bat_miss"].notna(),
+        needed + ["ball_bat_miss"],
+    ].dropna()
+    whiff_miss_model = smf.ols(f"ball_bat_miss ~ {rhs}", d_w).fit(cov_type="HC1")
+
+    # Contact model: geometric off-center distance in the contact plane
+    mask_c = (
+        (df["is_contact"] == 1) &
+        df["offset_z_in"].notna() &
+        (df["offset_x_in"].abs() <= 20)
+    )
+    d_c = df.loc[mask_c, needed + ["offset_z_in", "offset_x_in", "delta_run_exp"]].dropna().copy()
+    d_c["contact_miss"] = np.sqrt(d_c["offset_z_in"] ** 2 + d_c["offset_x_in"] ** 2)
+    contact_miss_model = smf.ols(f"contact_miss ~ {rhs}", d_c).fit(cov_type="HC1")
+
+    rv_model = smf.ols(
+        "delta_run_exp ~ contact_miss + C(balls) + C(strikes)", d_c
+    ).fit(cov_type="HC1")
+    miss_rv_slope = rv_model.params.get("contact_miss", 0.0)
+
+    return whiff_miss_model, contact_miss_model, miss_rv_slope
+
+
+def compute_miss_distortion_tax(df, whiff_miss_model, contact_miss_model,
+                                 miss_rv_slope, whiff_rv, commit_ms=150):
+    """Per-swing run-value cost of movement-caused increase in physical bat-to-ball miss.
+
+    Whiffs:   (movement_miss / ball_bat_miss) × whiff_rv[count]
+      The fraction of total miss attributable to post-commit movement, priced at the
+      count-adjusted whiff run value. Requires ball_bat_miss; NaN where missing.
+
+    Contacts: movement_miss_inches × miss_rv_slope  (continuous d(runs)/d(inch))
+      miss_rv_slope < 0, so positive movement_miss → negative tax (pitcher advantage).
+
+    movement_miss = a_x × pc_dev_x + a_z × pc_dev_z  (from the appropriate miss model)
+    Fraction is clipped to [0, 1]; negative movement_miss (movement reduced miss) → 0.
+
+    Returns Series aligned to df.index. Negative = pitcher advantage.
+    """
+    prefix = f"pc{commit_ms}"
+    dev_x  = f"{prefix}_dev_x"
+    dev_z  = f"{prefix}_dev_z"
+
+    result = pd.Series(np.nan, index=df.index)
+
+    # Whiff rows
+    whiff_mask = (df["is_whiff"] == 1) & df["ball_bat_miss"].notna() & df[dev_x].notna()
+    if whiff_mask.any():
+        dw   = df.loc[whiff_mask]
+        a_x  = whiff_miss_model.params.get(dev_x, 0.0)
+        a_z  = whiff_miss_model.params.get(dev_z, 0.0)
+        movement_miss = a_x * dw[dev_x] + a_z * dw[dev_z]
+        frac = np.clip(movement_miss / dw["ball_bat_miss"], 0.0, 1.0)
+        keys = list(zip(dw["balls"].astype(int), dw["strikes"].astype(int)))
+        w_rv = pd.Series(
+            [whiff_rv.get(k, whiff_rv["default"]) for k in keys],
+            index=dw.index,
+        )
+        result.loc[whiff_mask] = frac * w_rv
+
+    # Contact rows (continuous miss-to-xRV slope)
+    contact_mask = (df["is_contact"] == 1) & df[dev_x].notna()
+    if contact_mask.any():
+        dc = df.loc[contact_mask]
+        a_x = contact_miss_model.params.get(dev_x, 0.0)
+        a_z = contact_miss_model.params.get(dev_z, 0.0)
+        movement_miss = a_x * dc[dev_x] + a_z * dc[dev_z]
+        result.loc[contact_mask] = movement_miss * miss_rv_slope
+
+    return result
+
+
+# ── 7. Decision cost ────────────────────────────────────────────────────────────
+
+def compute_decision_cost(df, count_values_path, commit_ms=150, xrv_intended=None):
+    """Per-swing opportunity cost of swinging vs. taking at the projected plate location.
+
+    Evaluates the take value at x_proj / z_proj — the pre-commit location the batter's
+    decision was based on — not the actual plate location.
+
+    take_xRV = P_strike(x_proj, z_proj) × called_strike_rv[count]
+             + (1 − P_strike) × ball_rv[count]
+
+    decision_cost = take_xRV − xrv_intended
+
+    Positive = taking was better than swinging.
+    Negative = swinging was correct (batter attacked a pitch they could do damage on).
+
+    P_strike uses a smooth parametric strike zone (logistic sigmoid on zone boundaries).
+    An empirical model from non-swing pitches would be more accurate but requires a DB
+    pull of takes/called-strikes not currently in swings_precommit.parquet.
+
+    call_strike_rv[(b, s)]: ERV(b, s+1) - ERV(b, s) for s<2; −ERV(b,2) for s=2
+    ball_rv[(b, s)]:        ERV(b+1, s) - ERV(b, s) for b<3; WALK_RV − ERV(3,s) for b=3
+    """
+    prefix     = f"pc{commit_ms}"
+    x_proj_col = f"{prefix}_x_proj"
+    z_proj_col = f"{prefix}_z_proj"
+
+    cv = pd.read_csv(count_values_path).set_index(["balls", "strikes"])["expected_run_value"].to_dict()
+    WALK_RV = 0.33  # approximate mean run value of a walk (RE24 framework)
+
+    cs_rv_table, ball_rv_table = {}, {}
+    for (b, s), erv in cv.items():
+        cs_rv_table[(b, s)]   = (cv.get((b, s + 1), 0.0) - erv) if s < 2 else (0.0 - erv)
+        ball_rv_table[(b, s)] = (cv.get((b + 1, s), erv) - erv)  if b < 3 else (WALK_RV - erv)
+
+    keys    = list(zip(df["balls"].astype(int), df["strikes"].astype(int)))
+    cs_rv   = pd.Series([cs_rv_table.get(k, 0.0)   for k in keys], index=df.index)
+    b_rv    = pd.Series([ball_rv_table.get(k, 0.0)  for k in keys], index=df.index)
+
+    # Smooth parametric strike zone at projected location.
+    # k=8 gives a ~5%→95% transition over ≈0.3 ft around the zone boundary.
+    k       = 8.0
+    x_proj  = df[x_proj_col].values
+    z_proj  = df[z_proj_col].values
+    sz_top  = df["sz_top"].values  if "sz_top"  in df.columns else np.full(len(df), 3.5)
+    sz_bot  = df["sz_bot"].values  if "sz_bot"  in df.columns else np.full(len(df), 1.5)
+
+    p_strike = (
+        expit(k * ( 0.83 - x_proj)) *
+        expit(k * ( 0.83 + x_proj)) *
+        expit(k * (z_proj - sz_bot)) *
+        expit(k * (sz_top - z_proj))
+    )
+
+    take_xrv = pd.Series(
+        p_strike * cs_rv.values + (1.0 - p_strike) * b_rv.values,
+        index=df.index,
+    )
+
+    if xrv_intended is None:
+        raise ValueError("xrv_intended must be provided — pass results['_xrv_intended'].")
+
+    return (take_xrv - xrv_intended).rename("decision_cost")

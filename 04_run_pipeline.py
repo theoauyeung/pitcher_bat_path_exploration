@@ -242,6 +242,12 @@ def run(
     foul_rv  = foul_rv_from_count_values(count_values_path)
     print("Outcome models done.")
 
+    print("\nFitting miss models...")
+    whiff_miss_model, contact_miss_model, miss_rv_slope = _B.fit_miss_models(
+        swings, commit_ms=commit_ms
+    )
+    print(f"Miss models done.  miss_rv_slope={miss_rv_slope:.5f} runs/inch")
+
     # ── 5. Disruption tax + distortion/selection split ────────────────────────────
     print("\nComputing disruption tax...")
     results = _B.disruption_tax_split(
@@ -254,6 +260,19 @@ def run(
         mediator_models,
         commit_ms=commit_ms,
     )
+
+    print("Computing miss distortion tax...")
+    results["miss_distortion_tax"] = _B.compute_miss_distortion_tax(
+        results, whiff_miss_model, contact_miss_model, miss_rv_slope, whiff_rv,
+        commit_ms=commit_ms,
+    )
+
+    print("Computing decision cost...")
+    results["decision_cost"] = _B.compute_decision_cost(
+        results, count_values_path, commit_ms=commit_ms,
+        xrv_intended=results["_xrv_intended"],
+    )
+    results.drop(columns=["_xrv_intended"], inplace=True, errors="ignore")
 
     # ── 6. Analytical indirect effect ────────────────────────────────────────────
     ie = _B.indirect_effect(
@@ -272,7 +291,8 @@ def run(
     id_cols = ["batter_id", "pitcher_id", "game_pk", "at_bat_number", "pitch_number",
                "balls", "strikes", "pitch_type"]
     tax_cols = ["disruption_tax", "spatial_distortion_tax",
-                "distortion_tax", "selection_tax", "distortion_share"]
+                "distortion_tax", "selection_tax", "distortion_share",
+                "miss_distortion_tax", "decision_cost"]
     save_cols = [c for c in id_cols + tax_cols if c in results.columns]
 
     results[save_cols].to_parquet("results/xrv_causal.parquet", index=False)
@@ -290,6 +310,8 @@ def run(
                 mean_distortion_tax=("distortion_tax", "mean"),
                 mean_selection_tax=("selection_tax", "mean"),
                 mean_distortion_share=("distortion_share", "mean"),
+                mean_miss_distortion_tax=("miss_distortion_tax", "mean"),
+                mean_decision_cost=("decision_cost", "mean"),
             )
             .query("n_swings >= 50")
             .sort_values("mean_distortion_tax")
@@ -298,13 +320,16 @@ def run(
 
     joblib.dump(
         {
-            "mediator_models": mediator_models,
-            "bip_model":       bip_model,
-            "foul_model":      foul_model,
-            "xwoba_model":     xwoba_model,
-            "whiff_rv":        whiff_rv,
-            "foul_rv":         foul_rv,
-            "indirect_effects": ie,
+            "mediator_models":    mediator_models,
+            "bip_model":          bip_model,
+            "foul_model":         foul_model,
+            "xwoba_model":        xwoba_model,
+            "whiff_rv":           whiff_rv,
+            "foul_rv":            foul_rv,
+            "whiff_miss_model":   whiff_miss_model,
+            "contact_miss_model": contact_miss_model,
+            "miss_rv_slope":      miss_rv_slope,
+            "indirect_effects":   ie,
         },
         "models/causal_models.joblib",
     )
@@ -317,13 +342,16 @@ def run(
     print("  models/causal_models.joblib")
 
     return results, {
-        "mediator_models": mediator_models,
-        "bip_model":       bip_model,
-        "foul_model":      foul_model,
-        "xwoba_model":     xwoba_model,
-        "whiff_rv":        whiff_rv,
-        "foul_rv":         foul_rv,
-        "indirect_effects": ie,
+        "mediator_models":    mediator_models,
+        "bip_model":          bip_model,
+        "foul_model":         foul_model,
+        "xwoba_model":        xwoba_model,
+        "whiff_rv":           whiff_rv,
+        "foul_rv":            foul_rv,
+        "whiff_miss_model":   whiff_miss_model,
+        "contact_miss_model": contact_miss_model,
+        "miss_rv_slope":      miss_rv_slope,
+        "indirect_effects":   ie,
     }
 
 
