@@ -18,8 +18,11 @@
 |--------|---------|------|
 | `miss_distortion_tax` | Run-value cost of movement-caused increase in physical bat-to-ball miss | Negative = pitcher advantage |
 | `decision_cost` | Opportunity cost of swinging vs. taking at the **projected** plate location | Positive = taking was better |
+| `adjusted_disruption_tax` | Total batter burden vs. optimal action at projected location — `disruption_tax − max(0, decision_cost)` | Negative = pitcher advantage |
 
 `disruption_tax`, `distortion_tax`, `selection_tax`, `spatial_distortion_tax`, `distortion_share` are **unchanged**.
+
+`adjusted_disruption_tax` is additive: when swinging was optimal (`decision_cost ≤ 0`), it equals `disruption_tax`. When taking was better (`decision_cost > 0`), the baseline shifts to `take_xrv` and the full swing cost is captured. Population mean ≈ −0.012 runs vs. −0.002 for raw `disruption_tax`; 16.2% of swings have `decision_cost > 0`.
 
 ---
 

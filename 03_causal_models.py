@@ -31,11 +31,15 @@ import pandas as pd
 import statsmodels.formula.api as smf
 import statsmodels.api as sm
 from scipy.special import expit
+from xgboost import XGBClassifier, XGBRegressor
 
 
 # ── Column conventions ──────────────────────────────────────────────────────────
 
 ANGULAR_DEVS = ("vert_attack_angle_dev", "horz_attack_angle_dev", "swing_path_tilt_dev")
+
+# Feature order must be consistent between fit and predict.
+OUTCOME_FEATURES = list(ANGULAR_DEVS) + ["plate_x", "plate_z", "balls", "strikes"]
 ANGULAR_RESP = ("vert_attack_angle", "horz_attack_angle", "swing_path_tilt")
 
 def _pc(commit_ms, suffix):
@@ -89,33 +93,37 @@ def fit_mediator_models(df, commit_ms=150):
 def fit_outcome_models(df, commit_ms=150):
     """Fit all outcome components. Returns (bip_model, foul_model, xwoba_model, whiff_rv_table).
 
-    Outcome models use actual plate_x / plate_z (correctly estimated location effect).
-    Spatial disruption is priced in the counterfactual (_xrv_from_shape with zero_spatial=True
-    substitutes x_proj/z_proj for plate_x/plate_z), not through a decomposed-location formula.
+    XGBoost gradient-boosted trees replace the previous logistic/OLS models. Trees handle
+    non-linear plate-location effects and don't extrapolate linearly beyond the training
+    distribution — sparse regions (e.g. pitches 9" above zone) stay near their empirical
+    base rate rather than following a logistic slope into unrealistic territory.
 
-    Decomposed location (Option C) was reverted: pc150_dev_z absorbs gravity and is always
-    negative, so the regression coefficient is backward relative to causal direction.
+    Spatial disruption is priced via counterfactual (zero_spatial=True substitutes x_proj/z_proj).
     """
-    deviation_terms = " + ".join(ANGULAR_DEVS)
-    controls = (
-        f"{deviation_terms}"
-        f" + plate_x + plate_z"
-        f" + balls + strikes"
+    _xgb_kw = dict(
+        n_estimators=400, max_depth=5, learning_rate=0.05,
+        subsample=0.8, colsample_bytree=0.8,
+        random_state=42, n_jobs=-1,
     )
-    needed = list(ANGULAR_DEVS) + ["plate_x", "plate_z", "balls", "strikes"]
 
     d = df.copy()
     if "is_foul" not in d.columns:
         d["is_foul"] = ((d["is_contact"] == 1) & (d["is_bip"] != 1)).astype(int)
 
-    d_bip = d[needed + ["is_bip"]].dropna()
-    bip_model = smf.logit(f"is_bip ~ {controls}", d_bip).fit(cov_type="HC1", disp=False)
+    d_bip = d[OUTCOME_FEATURES + ["is_bip"]].dropna()
+    bip_model = XGBClassifier(**_xgb_kw).fit(
+        d_bip[OUTCOME_FEATURES], d_bip["is_bip"], verbose=False
+    )
 
-    d_foul = d.loc[d["is_bip"] == 0, needed + ["is_foul"]].dropna()
-    foul_model = smf.logit(f"is_foul ~ {controls}", d_foul).fit(cov_type="HC1", disp=False)
+    d_foul = d.loc[d["is_bip"] == 0, OUTCOME_FEATURES + ["is_foul"]].dropna()
+    foul_model = XGBClassifier(**_xgb_kw).fit(
+        d_foul[OUTCOME_FEATURES], d_foul["is_foul"], verbose=False
+    )
 
-    d_xwoba = df.loc[df["is_bip"] == 1, needed + ["xwoba"]].dropna()
-    xwoba_model = smf.ols(f"xwoba ~ {controls}", d_xwoba).fit(cov_type="HC1")
+    d_xwoba = df.loc[df["is_bip"] == 1, OUTCOME_FEATURES + ["xwoba"]].dropna()
+    xwoba_model = XGBRegressor(**_xgb_kw).fit(
+        d_xwoba[OUTCOME_FEATURES], d_xwoba["xwoba"], verbose=False
+    )
 
     whiffs = df[(df["is_swing"] == 1) & (df["is_whiff"] == 1) &
                 df["delta_run_exp"].notna()]
@@ -158,9 +166,10 @@ def _xrv_from_shape(df, bip_model, foul_model, xwoba_model, whiff_rv, foul_rv,
     for dev in ANGULAR_DEVS:
         score[dev] = 0.0 if zero_angular else df[dev]
 
-    p_bip            = bip_model.predict(score)
-    p_foul_given_not = foul_model.predict(score)
-    e_xwoba          = xwoba_model.predict(score)
+    feat = score[OUTCOME_FEATURES]
+    p_bip            = pd.Series(bip_model.predict_proba(feat)[:, 1],  index=df.index)
+    p_foul_given_not = pd.Series(foul_model.predict_proba(feat)[:, 1], index=df.index)
+    e_xwoba          = pd.Series(xwoba_model.predict(feat),             index=df.index)
 
     def _count_lookup(rv_table):
         return df.apply(
@@ -264,16 +273,18 @@ def disruption_tax_split(df, bip_model, foul_model, xwoba_model, whiff_rv, foul_
 # ── 4. Indirect effect (product-of-coefficients) ───────────────────────────────
 
 def indirect_effect(mediator_models, bip_model, foul_model, xwoba_model,
-                    whiff_rv, foul_rv, df, commit_ms=150):
-    """Analytical indirect effect of post-commit movement on run value.
+                    whiff_rv, foul_rv, df, commit_ms=150, eps=0.5):
+    """Numerical indirect effect of post-commit movement on run value.
+
+    Replaces the previous analytical formula (which required logistic model coefficients)
+    with a central finite-difference gradient — compatible with any predict API.
 
     For each angular deviation m:
       indirect_{m} = a_{m} × ∂xRV/∂m
 
-    ∂xRV/∂m accounts for all three channels (BIP, foul, whiff):
-      ∂xRV/∂m = ∂P(BIP)/∂m × (E[xwOBA] − foul_rv + (foul_rv − whiff_rv)×P(foul|not BIP))
-               + P(BIP) × ∂E[xwOBA]/∂m
-               + (1 − P(BIP)) × ∂P(foul|not BIP)/∂m × (foul_rv − whiff_rv)
+    ∂xRV/∂m ≈ (xRV(m + eps) − xRV(m − eps)) / (2 × eps)
+
+    eps is in the same units as the deviation (degrees for angular metrics).
 
     Returns a DataFrame with rows = deviation axes, columns:
       [a_x, a_z, grad_xrv, indirect_x, indirect_z]
@@ -282,40 +293,29 @@ def indirect_effect(mediator_models, bip_model, foul_model, xwoba_model,
     dev_x  = f"{prefix}_dev_x"
     dev_z  = f"{prefix}_dev_z"
 
-    score_cols = list(ANGULAR_DEVS) + ["plate_x", "plate_z", "balls", "strikes"]
-    d = df[score_cols].dropna()
+    d = df[OUTCOME_FEATURES + [dev_x, dev_z]].dropna()
 
-    p_bip   = bip_model.predict(d)
-    p_foul_cond = foul_model.predict(d)
-    e_xw    = xwoba_model.predict(d)
-
-    beta_bip  = bip_model.params
-    beta_foul = foul_model.params
-    beta_xw   = xwoba_model.params
-
-    whiff_val = d.apply(
-        lambda r: whiff_rv.get((int(r["balls"]), int(r["strikes"])), whiff_rv["default"]),
-        axis=1,
-    ).mean()
-    foul_val = d.apply(
-        lambda r: foul_rv.get((int(r["balls"]), int(r["strikes"])), foul_rv["default"]),
-        axis=1,
-    ).mean()
+    def _mean_xrv(score_df):
+        feat  = score_df[OUTCOME_FEATURES]
+        p_bip = bip_model.predict_proba(feat)[:, 1]
+        p_fc  = foul_model.predict_proba(feat)[:, 1]
+        e_xw  = xwoba_model.predict(feat)
+        keys  = list(zip(score_df["balls"].astype(int), score_df["strikes"].astype(int)))
+        w_rv  = np.array([whiff_rv.get(k, whiff_rv["default"]) for k in keys])
+        f_rv  = np.array([foul_rv.get(k,  foul_rv["default"])  for k in keys])
+        p_f   = (1 - p_bip) * p_fc
+        p_w   = (1 - p_bip) * (1 - p_fc)
+        return (p_bip * e_xw + p_f * f_rv + p_w * w_rv).mean()
 
     rows = []
     for dev_col, med_model in mediator_models.items():
         a_x = med_model.params.get(dev_x, np.nan)
         a_z = med_model.params.get(dev_z, np.nan)
 
-        dp_bip_dm        = (beta_bip.get(dev_col, 0.0) * p_bip * (1 - p_bip)).mean()
-        dp_foul_cond_dm  = (beta_foul.get(dev_col, 0.0) * p_foul_cond * (1 - p_foul_cond)).mean()
-        de_xw_dm         = beta_xw.get(dev_col, 0.0)
+        score_up = d[OUTCOME_FEATURES].copy(); score_up[dev_col] += eps
+        score_dn = d[OUTCOME_FEATURES].copy(); score_dn[dev_col] -= eps
 
-        grad_xrv = (
-            dp_bip_dm * (e_xw.mean() - foul_val + (foul_val - whiff_val) * p_foul_cond.mean())
-            + p_bip.mean() * de_xw_dm
-            + (1 - p_bip.mean()) * dp_foul_cond_dm * (foul_val - whiff_val)
-        )
+        grad_xrv = (_mean_xrv(score_up) - _mean_xrv(score_dn)) / (2 * eps)
 
         rows.append({
             "dev_col":    dev_col,

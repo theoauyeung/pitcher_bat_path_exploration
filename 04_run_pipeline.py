@@ -254,6 +254,14 @@ def run(
     )
     results.drop(columns=["_xrv_intended"], inplace=True, errors="ignore")
 
+    # adjusted_disruption_tax: total batter burden vs. optimal action at projected location.
+    # When taking was better (decision_cost > 0), the baseline shifts from xrv_intended to
+    # take_xrv: adjusted = disruption_tax − max(0, decision_cost).
+    # When swinging was already optimal (decision_cost ≤ 0): adjusted = disruption_tax.
+    results["adjusted_disruption_tax"] = (
+        results["disruption_tax"] - results["decision_cost"].clip(lower=0)
+    )
+
     # ── 6. Analytical indirect effect ────────────────────────────────────────────
     ie = _B.indirect_effect(
         mediator_models, bip_model, foul_model, xwoba_model,
@@ -270,7 +278,7 @@ def run(
     # ── 8. Save ───────────────────────────────────────────────────────────────────
     id_cols = ["batter_id", "pitcher_id", "game_pk", "at_bat_number", "pitch_number",
                "balls", "strikes", "pitch_type"]
-    tax_cols = ["disruption_tax", "spatial_distortion_tax",
+    tax_cols = ["disruption_tax", "adjusted_disruption_tax", "spatial_distortion_tax",
                 "distortion_tax", "selection_tax", "distortion_share",
                 "miss_distortion_tax", "decision_cost"]
     save_cols = [c for c in id_cols + tax_cols if c in results.columns]
@@ -290,6 +298,7 @@ def run(
                 mean_distortion_tax=("distortion_tax", "mean"),
                 mean_selection_tax=("selection_tax", "mean"),
                 mean_distortion_share=("distortion_share", "mean"),
+                mean_adjusted_disruption_tax=("adjusted_disruption_tax", "mean"),
                 mean_miss_distortion_tax=("miss_distortion_tax", "mean"),
                 mean_decision_cost=("decision_cost", "mean"),
             )
