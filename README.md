@@ -39,7 +39,7 @@ python results_scripts/07_intention_diagnostics.py # Phase A model diagnostics
 
 | File | Contents |
 |------|----------|
-| `results/xrv_causal.parquet` | Per-swing disruption / distortion / selection / spatial distortion / miss / decision cost |
+| `results/xrv_causal.parquet` | Per-swing disruption / adjusted disruption / distortion / selection / spatial distortion / miss / decision cost |
 | `results/distortion_pitcher.csv` | Pitcher-level distortion leaderboard (≥50 swings) |
 | `results/distortion_batter.csv` | Batter-level disruption leaderboard (≥50 swings) |
 | `results/figures/` | Kinematic diagrams and intention model diagnostics |
@@ -76,7 +76,7 @@ The residual — realized minus predicted — is the swing deviation used as the
 
 This lets us decompose the total disruption tax into spatial distortion (the ball ended up somewhere different than the batter expected) and angular disruption (the batter's swing plane was knocked off-target). The angular component is further split by how much was mechanically caused by movement vs. the batter's own decision.
 
-The pipeline also computes **physical miss** (bat-to-ball contact quality degradation from late movement) and **decision cost** (opportunity cost of swinging vs. taking at the projected location).
+The pipeline also computes **physical miss** (bat-to-ball contact quality degradation from late movement), **decision cost** (opportunity cost of swinging vs. taking at the projected location), and **adjusted disruption tax** (total batter burden vs. the optimal action — `disruption_tax − max(0, decision_cost)`).
 
 ---
 
@@ -95,7 +95,7 @@ python -m venv .venv
 .venv\Scripts\pip install -r requirements.txt   # Windows
 ```
 
-Core packages: `bambi`, `pymc`, `statsmodels`, `pandas`, `numpy`, `matplotlib`, `sqlalchemy`, `pymysql`.
+Core packages: `bambi`, `pymc`, `statsmodels`, `xgboost`, `pandas`, `numpy`, `matplotlib`, `sqlalchemy`, `pymysql`.
 
 ---
 
@@ -104,13 +104,15 @@ Core packages: `bambi`, `pymc`, `statsmodels`, `pandas`, `numpy`, `matplotlib`, 
 Each figure is a two-panel broadcast card: game screenshot with arrow callout (left) + dark metrics panel (right). The **DISRUPTION ANALYSIS** section shows:
 
 - **Post-commit drop** — vertical inches the ball moves after the batter commits. Movement the batter cannot react to.
-- **Proj. → actual** — the ball's projected vs. actual plate-crossing height. The gap is the spatial displacement the batter's brain never saw.
-- **Disruption tax** — total run-value cost of swing disruption (negative = pitcher advantage).
-- **Distortion / Selection bar** — fraction caused by post-commit movement (red) vs. the batter's own decision (amber).
+- **Proj. → actual** — the ball's projected vs. actual plate-crossing height, with zone context.
+- **Swing disruption** — run-value cost conditional on the decision to swing (`disruption_tax`; negative = pitcher advantage).
+- **Decision / Chase cost** — opportunity cost of swinging vs. taking at the projected location. Green when swinging was correct; red when taking was better.
+- **Total burden** — `adjusted_disruption_tax = disruption_tax − max(0, decision_cost)`. The headline metric: total batter cost vs. the optimal available action.
+- **Distortion / Selection bar** — fraction of swing disruption caused by post-commit movement (red) vs. the batter's own decision (amber).
 
 | Pitcher / Batter | Pitch | Dominant cause |
 |-----------------|-------|----------------|
-| Yamamoto / Bernabel | Splitter | Distortion |
+| Yamamoto / Bernabel | Curveball | Distortion (99.7%) |
 | Leiter / Ramirez | Curveball | Mixed |
-| Helsley / Mullins | Sweeper | Selection |
-| Sale / Harper | Slider | Selection |
+| Helsley / Mullins | Four-seam FB | Selection (95%) |
+| Sale / Harper | Slider | Mixed + chase penalty |

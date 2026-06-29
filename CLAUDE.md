@@ -74,12 +74,14 @@ Two sets of models:
 
 **Mediator models** (one per angular deviation axis): estimate how much of each swing deviation is mechanically caused by post-commit movement. The treatment coefficients give the causal leverage — degrees of swing deviation per foot of late movement.
 
-**Outcome models** (three channels): price swing deviation in run value.
+**Outcome models** (three channels): price swing deviation in run value using XGBoost gradient-boosted trees. Trees prevent the linear extrapolation artifacts that logistic/OLS models produce at extreme plate locations (e.g. pitches 9" above the zone) or extreme angular deviations.
 - `bip_model` — P(ball in play)
 - `foul_model` — P(foul | not BIP), fit only on non-BIP swings. Kept separate from whiff because at two strikes a foul keeps the PA alive; a whiff ends it.
 - `xwoba_model` — E[xwOBA | BIP]
 
-Also fits **miss models** to measure physical bat-to-ball miss on whiffs and contacts, and computes **decision cost** — the opportunity cost of swinging vs. taking at the projected plate location.
+Feature set for all three: `OUTCOME_FEATURES = ANGULAR_DEVS + ["plate_x", "plate_z", "balls", "strikes"]`. Column order matters — always slice with `df[OUTCOME_FEATURES]` before predicting.
+
+Also fits **miss models** (statsmodels OLS) to measure physical bat-to-ball miss on whiffs and contacts, and computes **decision cost** — the opportunity cost of swinging vs. taking at the projected plate location. **`adjusted_disruption_tax`** combines these: `disruption_tax − max(0, decision_cost)`, giving total batter burden vs. the optimal available action.
 
 **Disruption tax** uses three counterfactual scenarios:
 
@@ -90,14 +92,15 @@ Also fits **miss models** to measure physical bat-to-ball miss on whiffs and con
 | Intended | zero deviations | projected (pre-movement) |
 
 ```
-disruption_tax     = xrv_realized − xrv_intended
-spatial_distortion = xrv_spatial  − xrv_intended
-angular_disruption = xrv_realized − xrv_spatial
-distortion_tax     = spatial_distortion + angular_disruption × angular_distortion_share
-selection_tax      = angular_disruption × (1 − angular_distortion_share)
+disruption_tax          = xrv_realized − xrv_intended
+spatial_distortion      = xrv_spatial  − xrv_intended
+angular_disruption      = xrv_realized − xrv_spatial
+distortion_tax          = spatial_distortion + angular_disruption × angular_distortion_share
+selection_tax           = angular_disruption × (1 − angular_distortion_share)
+adjusted_disruption_tax = disruption_tax − max(0, decision_cost)
 ```
 
-`angular_distortion_share` uses squared-norm decomposition across the three angular axes. Spatial disruption is fully attributed to distortion by construction.
+`angular_distortion_share` uses squared-norm decomposition across the three angular axes. Spatial disruption is fully attributed to distortion by construction. `adjusted_disruption_tax` is additive — equals `disruption_tax` when swinging was correct; shifts baseline to `take_xrv` when taking was better.
 
 ### `04_run_pipeline.py` — Orchestrator
 
@@ -109,7 +112,7 @@ Runs Phase A → Phase B in sequence and writes all outputs. Key flag: `--skip-p
 
 | File | Contents |
 |------|----------|
-| `results/xrv_causal.parquet` | Per-swing disruption / distortion / selection / spatial distortion / miss / decision cost |
+| `results/xrv_causal.parquet` | Per-swing: `disruption_tax`, `adjusted_disruption_tax`, `distortion_tax`, `selection_tax`, `spatial_distortion_tax`, `distortion_share`, `miss_distortion_tax`, `decision_cost` |
 | `results/distortion_pitcher.csv` | Pitcher-level leaderboard (≥50 swings) |
 | `results/distortion_batter.csv` | Batter-level leaderboard (≥50 swings) |
 | `models/intention_result.joblib` | Phase A idata + training data |

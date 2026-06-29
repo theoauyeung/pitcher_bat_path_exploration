@@ -60,9 +60,11 @@ Outcome models use **actual** `plate_x`/`plate_z`. Spatial disruption is priced 
 
 | Model | Target | Sample | Method |
 |-------|--------|--------|--------|
-| `bip_model` | P(ball in play) | all swings | logistic (HC1 SEs) |
-| `foul_model` | P(foul \| not BIP) | non-BIP swings only | logistic (HC1 SEs) |
-| `xwoba_model` | E[xwOBA \| BIP] | BIP only | OLS (HC1 SEs) |
+| `bip_model` | P(ball in play) | all swings | XGBoost classifier |
+| `foul_model` | P(foul \| not BIP) | non-BIP swings only | XGBoost classifier |
+| `xwoba_model` | E[xwOBA \| BIP] | BIP only | XGBoost regressor |
+
+**Why XGBoost, not logistic/OLS**: linear models extrapolate in the wrong direction at extreme plate locations (pitches 9" above the zone were assigned 38% BIP probability by logistic regression; XGBoost assigns ~6%, consistent with the empirical base rate in that sparse region). Tree models also handle extreme angular deviation outliers (HAA_dev = −99°) without inflating e_xwoba unrealistically. All three models share the same feature set: `ANGULAR_DEVS + ["plate_x", "plate_z", "balls", "strikes"]` — column order is fixed by `OUTCOME_FEATURES` in `03_causal_models.py` and must match between fit and predict.
 
 **Why foul and whiff are separate**: at two strikes, a foul keeps the at-bat alive (run-value delta = 0); a whiff ends it (delta = −ERV(balls, 2)). Conflating them biases xRV for high-disruption swings where foul rate is elevated — the model would understate the cost of a whiff relative to a foul at the same disruption level.
 
@@ -118,7 +120,7 @@ distortion_share = distortion_tax / disruption_tax   (clipped to [0,1])
 - `fit_outcome_models(df, commit_ms)` → `(bip_model, foul_model, xwoba_model, whiff_rv)`
 - `_xrv_from_shape(df, ..., zero_angular, zero_spatial)` — evaluates one counterfactual scenario
 - `disruption_tax_split(df, ...)` → df with all tax columns + internal `_xrv_intended`
-- `indirect_effect(...)` → analytical product-of-coefficients cross-check
+- `indirect_effect(...)` → numerical finite-difference cross-check (central difference, eps=0.5°; replaces analytical product-of-coefficients which required statsmodels `.params` attributes)
 - `negative_control_check`, `positive_control_check` — built-in validation
 
 **`04_run_pipeline.py`** — Phase B runs after Phase A. Mediator and outcome models fit sequentially; disruption tax computed immediately after. `_xrv_intended` is passed to `compute_decision_cost` then dropped before save.
@@ -132,6 +134,9 @@ distortion_share = distortion_tax / disruption_tax   (clipped to [0,1])
 - [x] `disruption_tax = distortion_tax + selection_tax` holds for all non-NaN rows
 - [x] `spatial_distortion_tax` negative mean — ball displacement costs batters runs
 - [x] `angular_distortion_share` ∈ [0, 1] for all rows
-- [ ] Indirect effect (product-of-coefficients) directionally consistent with counterfactual tax
+- [x] `adjusted_disruption_tax ≤ disruption_tax` for all rows with `decision_cost > 0`
+- [x] `adjusted_disruption_tax == disruption_tax` for all rows with `decision_cost ≤ 0`
+- [x] XGBoost P(BIP) at extreme z (>4 ft above zone) attenuates near empirical base rate (~6%), not 38% as logistic predicted
+- [ ] Indirect effect (numerical finite-difference) directionally consistent with counterfactual tax
 - [ ] Robustness grid: commit_ms 125/150/175/200 produce consistent pitcher/batter leaderboard rankings
 - [ ] `distortion_share` by pitch type: sweepers > sinkers > four-seamers
