@@ -181,8 +181,10 @@ def load_pitch_metrics(
         sz_top           = float(rp["sz_top"]),
         sz_bot           = float(rp["sz_bot"]),
         # disruption model
-        disruption_tax   = float(rc["disruption_tax"]),
-        distortion_share = float(rc["distortion_share"]) * 100,
+        disruption_tax          = float(rc["disruption_tax"]),
+        adjusted_disruption_tax = float(rc["adjusted_disruption_tax"]),
+        decision_cost           = float(rc["decision_cost"]),
+        distortion_share        = float(rc["distortion_share"]) * 100,
         # previous pitch context
         prev_pitch       = prev_pitch,
     )
@@ -320,13 +322,26 @@ def make_broadcast_annotation(
     sz_top_in = data["sz_top"] * 12
     above_in  = proj_in - sz_top_in
 
-    row(y, "Post-commit drop", f"−{dev_in:.1f} in", RED); y -= rs
+    rs_d = 0.034  # tighter spacing for this section to fit 5 rows
     loc_note = f'+{above_in:.1f}" above zone' if above_in > 0 else "in zone"
+    row(y, "Post-commit drop", f"−{dev_in:.1f} in", RED); y -= rs_d
     row(y, "Proj. → actual",
-        f'{proj_in:.1f}" ({loc_note}) → {act_in:.1f}"', RED); y -= rs
-    row(y, "Disruption tax",
-        f"{data['disruption_tax']:+.3f} runs", RED); y -= rs
-    y -= 0.008
+        f'{proj_in:.1f}" ({loc_note}) → {act_in:.1f}"', RED); y -= rs_d
+
+    dt = data["disruption_tax"]
+    row(y, "Swing disruption",
+        f"{dt:+.3f} runs", RED if dt < 0 else AMBER); y -= rs_d
+
+    dc = data["decision_cost"]
+    dc_color = RED if dc > 0 else GREEN
+    dc_label = "Chase cost" if dc > 0 else "Decision"
+    dc_str   = f"{dc:+.3f} runs" if dc > 0 else f"correct ({dc:+.3f})"
+    row(y, dc_label, dc_str, dc_color); y -= rs_d
+
+    adj = data["adjusted_disruption_tax"]
+    row(y, "Total burden",
+        f"{adj:+.3f} runs", RED if adj < 0 else AMBER); y -= rs_d
+    y -= 0.005
 
     # distortion / selection bar
     hline(y + 0.006, BORDER); y -= 0.010
