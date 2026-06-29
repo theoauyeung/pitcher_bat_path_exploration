@@ -17,14 +17,14 @@ An angular-only model misses channel 2 entirely. A breaking ball dropping 6" aft
 
 The central design is evaluating `xRV` three times per swing to decompose disruption into spatial and angular components:
 
-| Scenario | Swing angles | Plate location | Purpose |
-|----------|-------------|----------------|---------|
-| `xrv_realized` | actual deviations | actual (post-movement) | what actually happened |
-| `xrv_spatial` | zero deviations | actual (post-movement) | cost of location shift alone, perfect swing |
-| `xrv_intended` | zero deviations | projected (pre-movement) | batter's information set, perfect swing |
+| Scenario | Angular deviations | Plate location | Purpose |
+|----------|--------------------|----------------|---------|
+| `xrv_realized` | actual `{metric}_dev` | actual `plate_x`, `plate_z` | What actually happened |
+| `xrv_spatial` | zero (0°) | actual `plate_x`, `plate_z` | Cost of spatial displacement alone, with a perfect swing |
+| `xrv_intended` | zero (0°) | projected `x_proj`, `z_proj` | Batter's information set — ball at pre-commit location, perfect swing |
 
 ```
-disruption_tax     = xrv_realized − xrv_intended  [negative = pitcher advantage]
+disruption_tax     = xrv_realized − xrv_intended     [negative = pitcher advantage]
 spatial_distortion = xrv_spatial  − xrv_intended
 angular_disruption = xrv_realized − xrv_spatial
 ```
@@ -35,73 +35,158 @@ angular_disruption = xrv_realized − xrv_spatial
 
 ---
 
-## Mediator models
+## 1. Mediator models
 
-One linear mixed-effects model per angular deviation axis:
+### Formula
+
+One linear mixed-effects model per angular deviation axis m ∈ {`vert_attack_angle_dev`, `horz_attack_angle_dev`, `swing_path_tilt_dev`}:
 
 ```
-{metric}_dev ~ pc{ms}_dev_x + pc{ms}_dev_z     ← treatment (post-commit movement)
-             + pc{ms}_x_proj + pc{ms}_z_proj    ← pre-commit projected location (control)
-             + release_speed + balls + strikes + offset_y_ms
-             + (1 | batter_id)
+m_dev_i = α₀
+        + α₁ · pc_dev_x_i
+        + α₂ · pc_dev_z_i
+        + α₃ · x_proj_i
+        + α₄ · z_proj_i
+        + α₅ · release_speed_i
+        + α₆ · balls_i
+        + α₇ · strikes_i
+        + α₈ · offset_y_ms_i
+        + u₀ⱼ                   [per-batter random intercept]
+        + εᵢ,  εᵢ ~ N(0, σ²)
 ```
 
-The pre-commit projected location is a required control — without it, any correlation between typical pitch location and typical swing deviation would contaminate the treatment estimate. Conditioning on projection makes post-commit deviation exogenous to the swing decision (conditional ignorability).
+### Variable definitions
 
-Treatment coefficients `a_x`, `a_z` per axis give the causal leverage: degrees of swing deviation caused by one foot of post-commit horizontal or vertical movement.
+| Symbol | Column | Units | Description |
+|--------|--------|-------|-------------|
+| `m_dev_i` | `{metric}_dev` | degrees | Angular swing deviation = realized − intended from Phase A |
+| `pc_dev_x_i` | `pc{ms}_dev_x` | feet | Post-commit horizontal movement: actual `plate_x` − projected `x_proj` |
+| `pc_dev_z_i` | `pc{ms}_dev_z` | feet | Post-commit vertical movement: actual `plate_z` − projected `z_proj` |
+| `x_proj_i` | `pc{ms}_x_proj` | feet | Pre-commit projected plate x — where the ball was heading at commit time |
+| `z_proj_i` | `pc{ms}_z_proj` | feet | Pre-commit projected plate z |
+| `release_speed_i` | `release_speed` | mph | Pitch velocity at release |
+| `balls_i` | `balls` | count 0–3 | Balls in count |
+| `strikes_i` | `strikes` | count 0–2 | Strikes in count |
+| `offset_y_ms_i` | `offset_y_ms` | ms | Contact timing offset |
+| `u₀ⱼ` | — | — | Per-batter random intercept |
 
-Minimum sample thresholds: batters with < 20 swings and pitchers with < 10 swings are excluded. Pitcher ID is not in the model (crossed random effects add cost with minimal benefit — the pre-commit control already absorbs most pitch-quality variation).
+The pre-commit projected location (`x_proj`, `z_proj`) is a required control — without it, any correlation between typical pitch location and typical swing deviation would contaminate the treatment estimate. Conditioning on projection makes post-commit deviation exogenous to the swing decision (conditional ignorability).
+
+Treatment coefficients **`a_x_m = α₁`** and **`a_z_m = α₂`** give the causal leverage: degrees of swing deviation per foot of post-commit horizontal or vertical movement, respectively.
 
 ---
 
-## Outcome models (three channels)
+## 2. Outcome models
 
-Outcome models use **actual** `plate_x`/`plate_z`. Spatial disruption is priced through the counterfactual (substituting `x_proj`/`z_proj` at predict time), not through additional regressors.
+### Feature set
 
-| Model | Target | Sample | Method |
-|-------|--------|--------|--------|
-| `bip_model` | P(ball in play) | all swings | XGBoost classifier |
-| `foul_model` | P(foul \| not BIP) | non-BIP swings only | XGBoost classifier |
-| `xwoba_model` | E[xwOBA \| BIP] | BIP only | XGBoost regressor |
+All three outcome models share the same feature vector (column order is fixed):
 
-**Why XGBoost, not logistic/OLS**: linear models extrapolate in the wrong direction at extreme plate locations (pitches 9" above the zone were assigned 38% BIP probability by logistic regression; XGBoost assigns ~6%, consistent with the empirical base rate in that sparse region). Tree models also handle extreme angular deviation outliers (HAA_dev = −99°) without inflating e_xwoba unrealistically. All three models share the same feature set: `ANGULAR_DEVS + ["plate_x", "plate_z", "balls", "strikes"]` — column order is fixed by `OUTCOME_FEATURES` in `03_causal_models.py` and must match between fit and predict.
-
-**Why foul and whiff are separate**: at two strikes, a foul keeps the at-bat alive (run-value delta = 0); a whiff ends it (delta = −ERV(balls, 2)). Conflating them biases xRV for high-disruption swings where foul rate is elevated — the model would understate the cost of a whiff relative to a foul at the same disruption level.
-
-**Composite xRV**:
 ```
-P(foul)  = (1 − P(BIP)) × P(foul | not BIP)
-P(whiff) = (1 − P(BIP)) × (1 − P(foul | not BIP))
-xRV = P(BIP) × E[xwOBA|BIP]  +  P(foul) × foul_rv[count]  +  P(whiff) × whiff_rv[count]
+OUTCOME_FEATURES = [
+    vert_attack_angle_dev,    # degrees — swing plane deviation
+    horz_attack_angle_dev,    # degrees — horizontal direction deviation
+    swing_path_tilt_dev,      # degrees — barrel tilt deviation
+    plate_x,                  # feet — actual plate x at crossing (or x_proj in counterfactual)
+    plate_z,                  # feet — actual plate z at crossing (or z_proj in counterfactual)
+    balls,                    # count
+    strikes,                  # count
+]
 ```
 
-Count-transition run values come from `count_values.csv` (RE24 framework). Foul at (b, s=2) → delta = 0; whiff at (b, s=2) → delta = −ERV(b, 2).
+### Three XGBoost models
+
+| Model | Target `y` | Training sample | Architecture |
+|-------|-----------|-----------------|--------------|
+| `bip_model` | `P(BIP_i)` = P(ball in play) | All swings | XGBoost classifier |
+| `foul_model` | `P(foul_i \| not BIP)` = P(foul given swing not in play) | Non-BIP swings only | XGBoost classifier |
+| `xwoba_model` | `E[xwOBA_i \| BIP]` = expected wOBA on balls in play | BIP only | XGBoost regressor |
+
+Hyperparameters: `n_estimators=400`, `max_depth=5`, `learning_rate=0.05`, `subsample=0.8`, `colsample_bytree=0.8`.
+
+**Why XGBoost**: linear models extrapolate in the wrong direction at extreme plate locations (pitches 9" above the zone were assigned 38% BIP probability by logistic regression; XGBoost assigns ~6%, consistent with the empirical base rate in that sparse region). Tree models also handle extreme angular deviation outliers (HAA_dev = −99°) without inflating xRV unrealistically.
+
+**Why foul and whiff are separate**: at two strikes, a foul keeps the at-bat alive (run-value delta = 0); a whiff ends it (delta = −ERV(balls, 2)). Conflating them biases xRV for high-disruption swings where foul rate is elevated.
+
+### Composite xRV formula
+
+```
+P(foul_i)  = (1 − P(BIP_i))  ×  P(foul_i | not BIP_i)
+
+P(whiff_i) = (1 − P(BIP_i))  ×  (1 − P(foul_i | not BIP_i))
+
+xRV_i = P(BIP_i) × E[xwOBA_i | BIP_i]
+      + P(foul_i) × foul_rv[balls_i, strikes_i]
+      + P(whiff_i) × whiff_rv[balls_i, strikes_i]
+```
+
+| Symbol | Source | Description |
+|--------|--------|-------------|
+| `P(BIP_i)` | `bip_model.predict_proba()[:, 1]` | Probability swing results in a ball in play |
+| `P(foul_i \| not BIP_i)` | `foul_model.predict_proba()[:, 1]` | Probability of foul given not BIP |
+| `E[xwOBA_i \| BIP_i]` | `xwoba_model.predict()` | Expected xwOBA conditional on BIP |
+| `foul_rv[b, s]` | `count_values.csv` | Run value of a foul at count (b, s); = 0 at s=2 |
+| `whiff_rv[b, s]` | Empirical mean of `delta_run_exp` on whiffs by count | Run value of a whiff at count (b, s) |
 
 ---
 
-## Distortion / selection attribution
+## 3. Disruption tax decomposition
 
-The angular disruption is further split by how much was mechanically caused by movement vs. the batter's own decision. For each swing, the mediator model provides the movement-caused component of each deviation:
+### Three xRV evaluations
 
-```
-distortion_dev_m = a_x_m × pc_dev_x + a_z_m × pc_dev_z
-selection_dev_m  = {metric}_dev_m − distortion_dev_m
-```
+The same `_xrv_from_shape()` function is called three times with different inputs:
 
-Attribution uses squared-norm decomposition across the three angular axes:
-```
-angular_distortion_share = ||distortion_dev||² / ||total_dev||²   (clipped to [0,1])
-```
+| Call | `zero_angular` | `zero_spatial` | Plate location used | Angular deviations used |
+|------|----------------|----------------|---------------------|------------------------|
+| `xrv_realized` | False | False | `plate_x`, `plate_z` | actual `{metric}_dev` |
+| `xrv_spatial` | True | False | `plate_x`, `plate_z` | 0° for all three axes |
+| `xrv_intended` | True | True | `x_proj`, `z_proj` | 0° for all three axes |
 
-The raw L2-norm ratio is wrong when distortion and selection components point in opposite directions (e.g. movement pushed VAA down but batter also pulled it down intentionally). Squared-norm gives a clean [0,1] proportion regardless of sign alignment.
-
-Spatial disruption is 100% attributed to distortion by construction — late movement is the only cause of the ball arriving somewhere different than projected.
+### Primary decomposition
 
 ```
-distortion_tax = spatial_distortion + angular_disruption × angular_distortion_share
-selection_tax  = angular_disruption × (1 − angular_distortion_share)
-distortion_share = distortion_tax / disruption_tax   (clipped to [0,1])
+disruption_tax_i     = xrv_realized_i − xrv_intended_i
+spatial_distortion_i = xrv_spatial_i  − xrv_intended_i
+angular_disruption_i = xrv_realized_i − xrv_spatial_i
 ```
+
+### Angular distortion attribution
+
+For each angular axis m, the mediator model gives the portion of deviation caused by movement:
+
+```
+distortion_dev_m_i = a_x_m × pc_dev_x_i  +  a_z_m × pc_dev_z_i
+selection_dev_m_i  = m_dev_i  −  distortion_dev_m_i
+```
+
+Squared-norm decomposition across all three angular axes:
+
+```
+angular_distortion_share_i = Σ_m(distortion_dev_m_i²) / Σ_m(m_dev_i²)
+```
+
+| Symbol | Description |
+|--------|-------------|
+| `a_x_m` | `mediator_models[m].params['pc{ms}_dev_x']` — causal leverage: degrees of deviation per foot of horizontal movement |
+| `a_z_m` | `mediator_models[m].params['pc{ms}_dev_z']` — causal leverage per foot of vertical movement |
+| `m_dev_i` | Total angular deviation on axis m for swing i |
+| `angular_distortion_share_i` | Fraction of angular deviation explained by movement; clipped to [0, 1]; NaN when Σ_m(m_dev²) < 1e-8 |
+
+The squared-norm ratio is used rather than a raw L2 ratio so that the result is always in [0, 1] regardless of whether distortion and selection components point in the same or opposite directions.
+
+### Final tax split
+
+```
+distortion_tax_i = spatial_distortion_i  +  angular_disruption_i × angular_distortion_share_i
+
+selection_tax_i  = angular_disruption_i  ×  (1 − angular_distortion_share_i)
+
+distortion_share_i = distortion_tax_i / disruption_tax_i      [clipped to [0, 1]]
+```
+
+**Invariant**: `disruption_tax = distortion_tax + selection_tax` holds exactly for all non-NaN rows.
+
+**Spatial disruption is 100% attributed to distortion** by construction — late movement is the only cause of the ball arriving somewhere different than projected.
 
 ---
 
