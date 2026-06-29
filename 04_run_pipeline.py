@@ -1,18 +1,16 @@
 """
-Full pipeline: Phase A (batter intention) -> Phase B (causal mediation) -> disruption tax.
+Orchestrates Phase A (batter intention) → Phase B (causal mediation) → disruption tax.
 
-Expects data/swings_precommit.parquet (run 01_pull_data.py then 02_precommit_split.py first).
+Expects data/swings_precommit.parquet — run 00_pull_data.py and 01_precommit_split.py first.
+
+Key flags:
+  --skip-phase-a   reload Phase A from models/intended_df.parquet without refitting
+  --method vi      use ADVI (~2 min) instead of MCMC (~hours); equivalent for point estimates
 
 Outputs:
-  results/xrv_causal.parquet     — per-swing disruption, distortion, selection tax
-  results/xrv_causal.csv         — same, CSV for quick inspection
-  results/distortion_pitcher.csv  — distortion tax aggregated by pitcher (≥50 swings)
-  results/distortion_batter.csv   — distortion tax aggregated by batter (≥50 swings)
-  models/intended_df.parquet      — Phase A intended swing shape per swing (cache)
-  models/causal_models.joblib     — Phase B fitted models
-
-Run:
-    python 04_run_pipeline.py
+  results/xrv_causal.parquet / .csv
+  results/distortion_pitcher.csv, distortion_batter.csv
+  models/intended_df.parquet, intention_result.joblib, causal_models.joblib
 """
 
 import argparse
@@ -160,19 +158,7 @@ def run(
     intention_cache="models/intended_df.parquet",
     method="mcmc",
 ):
-    """Run the full Phase A -> Phase B pipeline.
-
-    commit_ms:       commit time for pre/post-commit split (default 150ms; robustness
-                     grid runs 125/150/175/200 separately)
-    n_subsample:     rows for Phase A MCMC fitting. Default 75k — keeps the pitcher_id
-                     contrast matrix (n_rows × n_pitchers) under ~500 MB. Use None for
-                     production, but ensure ≥16 GB RAM free.
-    draws/tune:      MCMC settings. tune=1000 minimum for this model; 500 causes
-                     divergences and R-hat > 1.01.
-    max_treedepth:   NUTS tree depth cap (default 15). The simplified batter RE formula
-                     (intercept + strikes only) should rarely hit depth 10, but 15 gives
-                     headroom without exploding runtime.
-    """
+    """Run the full Phase A → Phase B pipeline."""
     Path("results").mkdir(exist_ok=True)
     Path("models").mkdir(exist_ok=True)
 
@@ -230,12 +216,6 @@ def run(
     print("Mediator models done.")
 
     # ── 4. Phase B: outcome models ────────────────────────────────────────────────
-    # bip_model:   logistic P(BIP) ~ angular_devs + x_proj + z_proj + pc_dev_x + pc_dev_z + count
-    # foul_model:  logistic P(foul | not BIP) ~ same predictors, non-BIP swings only
-    # xwoba_model: OLS xwOBAcon ~ same, BIP only
-    # Location decomposed into projected target + spatial deviation so the model
-    # prices breaking-ball spatial disruption directly (see 03_causal_models.py §2).
-    # whiff_rv/foul_rv: count-transition values from count_values.csv
     print("\nFitting outcome models...")
     bip_model, foul_model, xwoba_model, _ = _B.fit_outcome_models(swings, commit_ms=commit_ms)
     whiff_rv = whiff_rv_from_count_values(count_values_path)

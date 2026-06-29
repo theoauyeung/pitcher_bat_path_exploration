@@ -1,51 +1,23 @@
 """
-Pre/post-commit trajectory split via Zobrist-style 9-parameter reconstruction.
+Pre/post-commit trajectory split.
 
-Identification strategy (proj_desc.md §6):
-  A batter cannot select on information they do not have. The swing is committed
-  early; post-commit movement is the gap between where the ball actually crossed
-  the plate and where it would have crossed had no further forces acted after
-  commit. Conditioning on the full pre-commit trajectory makes post-commit
-  deviation exogenous to the swing decision (conditional ignorability).
+Reconstructs each pitch's full flight path from release parameters, then
+computes where the ball would have crossed the plate if it had continued on a
+constant-acceleration trajectory from commit time forward. The gap between
+that projected location and the actual plate crossing is the post-commit
+deviation — movement the batter had no time to react to.
 
-Trajectory model (origin at the actual release point):
-  x(t) = R_x + V_x·t + ½·A_x·t²
-  y(t) = R_y + V_y·t + ½·A_y·t²   (y=0 at front of plate)
-  z(t) = R_z + V_z·t + ½·A_z·t²
+Commit time defaults to 150 ms pre-contact. This is deliberately conservative
+(understates distortion), so any measured effect is a lower bound.
 
-  R_y = 60.5 − extension (release y-position, ft from front of plate).
-
-  Parameters are reconstructed from release position, pfx_x/pfx_z (horizontal
-  and induced-vertical break), and release speed — following the same approach
-  as Zobrist's hitter_advance_report.create_9p_fit. This is equivalent to the
-  previous ax/ay/az approach but anchored at release rather than the Statcast
-  50 ft reference, and uses pfx for better stability under missing/noisy ax.
-
-  A_y: aerodynamic drag in the y direction (decelerates the ball).
-  A_x, A_z: solved analytically to reproduce the known plate crossing (plate_x,
-  plate_z) given the spinless-trajectory release angles.
-
-  Key identity: A_x ≈ 2·pfx_x / t_plate², so dev_x = pfx_x·(commit_s/t_plate)²
-  and similarly dev_z. Post-commit deviation is an exact fractional rescaling of
-  the total break, with the fraction determined by how early the batter commits.
-
-Commit time is set early deliberately (default 150 ms). Conservative choice gives
-a lower bound on distortion; robustness grid demotes it to a sensitivity check.
-
-Columns added (prefix pc{commit_ms}_):
+Columns added per commit time (prefix pc{commit_ms}_):
   dev_x, dev_z, dev_total  — post-commit deviation at plate (ft)
-  x_proj, z_proj           — pre-commit projected plate crossing (ft)
-  x_commit, y_commit, z_commit  — ball position at commit time (ft)
-  vx_commit, vy_commit, vz_commit — velocity at commit time (ft/s)
-  t_plate                  — flight time from release to plate (s)
-  R_x, R_y, R_z            — release position (ft)
-  V_x, V_y, V_z            — release velocity (ft/s)
-  A_x, A_y, A_z            — trajectory accelerations (ft/s²)
+  x_proj, z_proj           — projected plate crossing before late movement (ft)
+  x_commit, y_commit, z_commit, vx/vy/vz_commit — ball state at commit time
+  t_plate                  — total flight time release → plate (s)
+  R/V/A _x/y/z             — 9-parameter trajectory params (used by visualizations)
 
 Output: data/swings_precommit.parquet
-
-Run:
-    .venv/Scripts/python.exe 01_precommit_split.py
 """
 import numpy as np
 import pandas as pd

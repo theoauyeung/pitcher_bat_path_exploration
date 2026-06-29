@@ -1,55 +1,29 @@
 """
 Phase B: run-value mediation models.
 
-DAG (two disruption channels):
-  post-commit movement  →  angular deviation  →  run value   (angular / mediated path)
-  post-commit movement  →  spatial displacement →  run value  (spatial / direct path)
-      (treatment)                                  (outcome)
+Two disruption channels:
+  post-commit movement → angular swing deviation → run value   (mediated path)
+  post-commit movement → spatial plate displacement → run value (direct path)
 
-Breaking balls expose a limitation of the angular-only model: a batter can execute
-their intended swing plane perfectly yet miss because the ball crossed the plate 8"
-from where they projected it.  The redesign addresses this with two changes:
+A batter can execute their intended swing plane perfectly and still miss because
+the ball crossed the plate inches from where they projected it. Both channels
+are priced through a three-scenario counterfactual:
 
-  Option B — changed counterfactual
-    Old: xRV(intended) = predict(zero angular devs, ACTUAL plate location)
-    New: xRV(intended) = predict(zero angular devs, zero post-commit movement)
-         → ball stays at the projected location (pc{ms}_x_proj, pc{ms}_z_proj),
-           not the actual plate_x / plate_z.
-    This directly prices the spatial shift caused by late movement.
+  xrv_realized  — actual swing deviations, actual plate location
+  xrv_spatial   — perfect swing, actual plate location (spatial disruption only)
+  xrv_intended  — perfect swing, ball at projected location (batter's information set)
 
+  disruption_tax     = xrv_realized − xrv_intended  [negative = pitcher advantage]
+  spatial_distortion = xrv_spatial  − xrv_intended
+  angular_disruption = xrv_realized − xrv_spatial
 
-Three components
-────────────────
-1. Mediator models (one per angular deviation axis) — unchanged
-     dev ~ pc{ms}_dev_x + pc{ms}_dev_z + x_proj + z_proj
-           + release_speed + balls + strikes + offset_y_ms
-           + (1 | batter_id)
+The angular disruption is split by how much was movement-caused (distortion) vs.
+the batter's own decision (selection), using squared-norm decomposition across the
+three angular axes. Spatial disruption is 100% attributed to distortion.
 
-2. Outcome models — three channels, actual plate location
-     P(BIP):            logistic on angular_devs + plate_x + plate_z + count
-     P(foul | not BIP): logistic on same, non-BIP swings only
-     xwOBAcon:          linear on same, BIP only
-
-3. Disruption tax — three-scenario predict-twice
-     xrv_realized    = predict(actual_devs,  plate_x=actual,  plate_z=actual)
-     xrv_spatial     = predict(zero_devs,    plate_x=actual,  plate_z=actual)
-     xrv_intended    = predict(zero_devs,    plate_x=x_proj,  plate_z=z_proj)
-
-     disruption_tax       = xrv_realized − xrv_intended
-     spatial_distortion   = xrv_spatial  − xrv_intended  (location shift, perfect swing)
-     angular_disruption   = xrv_realized − xrv_spatial   (deviation on top of shift)
-
-   Angular distortion share (from mediator models):
-     distortion_dev_m = a_x_m × pc_dev_x + a_z_m × pc_dev_z
-     angular_distortion_share = ||distortion_dev||² / ||total_dev||²  (clipped to [0,1])
-
-   Final:
-     distortion_tax = spatial_distortion + angular_disruption × angular_distortion_share
-     selection_tax  = angular_disruption × (1 − angular_distortion_share)
-     distortion_share = distortion_tax / disruption_tax  (clipped to [0,1])
-
-Negative-control check built in: filter to FF with dev_total < threshold
-and verify that disruption_tax ≈ 0.
+Also includes physical miss models (bat-to-ball contact quality on whiffs and
+contacts) and decision cost (opportunity cost of swinging vs. taking at the
+projected plate location).
 """
 
 import numpy as np

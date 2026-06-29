@@ -1,40 +1,28 @@
 """
 Phase A: Batter intended-swing model.
 
-Estimates each batter's intended swing shape conditional on count, pitch location,
-and timing. The deviation residual is the mediator that Phase B prices in run value.
+Estimates what each batter intended to do given count, pitch location, contact
+timing, and platoon handedness. Per-batter random effects capture baseline swing
+tendencies and how each batter adjusts under count pressure.
 
-Powers-Yurko skeleton extended per proj_desc.md §8:
+The residual (realized − intended) is the swing deviation used as the Phase B
+mediator. A larger residual means the batter's swing drifted further from their
+plan — either due to late pitch movement or a poor decision.
 
-  Responses — primary (angular, Gaussian/Student-t):
-    vert_attack_angle   — attack angle at contact
-    horz_attack_angle   — attack direction at contact
-    swing_path_tilt     — tilt of the bat head over ~40ms before contact
+Five responses: vert_attack_angle, horz_attack_angle, swing_path_tilt (angular),
+bat_speed, swing_length (effort). Each gets a separate Bambi/PyMC Gaussian LMM.
 
-  Responses — secondary (effort, skew-normal):
-    bat_speed, swing_length
+Angular responses use a quadratic height term and contact-timing conditioning to
+avoid misattributing appropriate plane adaptation as execution error. Pitcher REs
+are excluded from predictions so the baseline reflects the batter's intention
+against a neutral opponent, not the specific pitcher they faced.
 
-  Population predictors (angular):
-    count (balls, strikes)
-    plate_x_bat  — location in the batter's frame (inside is positive for both hands)
-    plate_z, plate_z²  — quadratic smooth on height; batters tilt to match pitch plane,
-                          under-modeling height mislabels appropriate adaptation as error
-    offset_y_ms  — timing (early/on-time/late); removes arc-sampling artifact from deviation
-
-  Population predictors (effort):
-    count, plate_x_bat, plate_z (no quadratic, no timing — location is a minor modifier)
-
-  Batter RE: intercept + slopes on strikes + plate_x_bat + plate_z  (one per response)
-  Pitcher RE: intercept only (partials mound quality out of the intention baseline)
-
-True joint mvbind fit (correlated batter RE across responses) requires brms. Python
-approximation: separate Bambi fits per response 
-The joint covariance structure is recovered post-hoc rather
-than jointly identified, which is the only material concession.
+Default inference: method="vi" (ADVI, ~2 min). Only posterior means are used
+downstream so VI is equivalent to MCMC for this pipeline.
 
 Outputs per swing:
-  intended_{metric}   — E[metric | batter, count, location, timing]
-  {metric}_dev        — realized - intended  (the Phase B mediator)
+  intended_{metric}   — posterior-mean predicted swing shape
+  {metric}_dev        — realized − intended  (the Phase B mediator)
 """
 
 import numpy as np

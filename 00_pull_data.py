@@ -1,30 +1,13 @@
 """
 Pull 2023-2025 MLB pitches, compute within-PA sequence lags, then filter to
-tracked swings and save as a single CSV.
+tracked swings.
 
-Why pull ALL pitches (not just swings):
-  Sequence features (prev pitch type, velo delta, location shift, prior outcome)
-  require knowing what the PREVIOUS pitch was — which may have been a take, ball,
-  or called strike that never shows up in a swing-only pull. Pulling everything
-  first lets us compute the correct lag for each swing event.
+All pitches are pulled first (not just swings) so sequence lag features
+(prev pitch type, velocity delta, location shift) capture what the batter
+actually faced on the previous pitch, including takes and balls.
 
 Output: data/swings_2023_2025.csv
-  Bat-tracking coverage starts 2H 2023; 2023 rows will have NaN for bat-tracking
-  columns on pitches before that rollout. Filter downstream as needed.
-
-Columns added vs earlier versions:
-  x0/y0/z0, vx0/vy0/vz0, ax/ay/az  — 9-param Statcast trajectory at y=50 ft;
-                                       required for the pre/post-commit split
-  sz_top, sz_bot                     — batter-specific strike zone bounds
-  delta_run_exp                      — run expectancy change per pitch (xRV)
-  outs_when_up, inning               — game-state context
-
-Swing quality filters applied:
-  bat_speed > 40 mph         — removes sub-human / tracker garbage
-  vert_attack_angle ±45 deg  — removes 0.1% extreme outliers
-
-Run:
-    python 01_pull_data.py
+  Bat-tracking columns are NaN for 2023 pitches before the mid-season rollout.
 """
 
 import os

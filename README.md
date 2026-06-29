@@ -17,17 +17,16 @@ We exploit the neuromuscular timing asymmetry: a batter cannot react to ball mov
 
 ## Pipeline
 
-Run scripts in order from project root:
-
 ```bash
-python 00_pull_data.py          # pull MLB pitch-by-pitch data from mlb_db → data/
-python 01_precommit_split.py    # compute pre/post-commit trajectory split → data/swings_precommit.parquet
-python 02_intention_model.py    # Phase A: fit batter intended-swing LMMs → models/
-python 03_causal_models.py      # Phase B: fit mediation + outcome models → models/
-python 04_run_pipeline.py       # orchestrate Phase A → B → results/xrv_causal.parquet
+python 00_pull_data.py          # pull MLB pitch-by-pitch from mlb_db → data/
+python 01_precommit_split.py    # compute pre/post-commit trajectory split
+python run_values.py            # build RE24, linear weights
+python 04_run_pipeline.py       # Phase A + Phase B → results/xrv_causal.parquet
 ```
 
-Visualization scripts (run from project root after pipeline):
+`04_run_pipeline.py` also accepts `--skip-phase-a` to reload cached Phase A output and `--method vi` for fast ADVI inference (~2 min vs. hours for MCMC).
+
+Visualization scripts (run after pipeline):
 
 ```bash
 python results_scripts/06_kinematic_diagram.py     # annotated broadcast cards per pitch
@@ -40,7 +39,7 @@ python results_scripts/07_intention_diagnostics.py # Phase A model diagnostics
 
 | File | Contents |
 |------|----------|
-| `results/xrv_causal.parquet` | Per-swing disruption / distortion / selection / spatial distortion tax |
+| `results/xrv_causal.parquet` | Per-swing disruption / distortion / selection / spatial distortion / miss / decision cost |
 | `results/distortion_pitcher.csv` | Pitcher-level distortion leaderboard (≥50 swings) |
 | `results/distortion_batter.csv` | Batter-level disruption leaderboard (≥50 swings) |
 | `results/figures/` | Kinematic diagrams and intention model diagnostics |
@@ -49,39 +48,25 @@ python results_scripts/07_intention_diagnostics.py # Phase A model diagnostics
 
 ## Methodology
 
-### Step 1 — Pre/post-commit trajectory split (`01_precommit_split.py`)
+### Step 1 — Pre/post-commit trajectory split
 
-Each pitch is modeled as a nine-parameter constant-acceleration trajectory anchored at release. For each swing, we compute where the ball would have crossed the plate if it had continued on that trajectory from commit time onward (`x_proj`, `z_proj`). The gap between this projected location and the actual plate crossing (`dev_x`, `dev_z`) is the post-commit deviation — movement the batter had no time to respond to.
+Each pitch's full flight path is reconstructed from release parameters. For each swing, we compute where the ball *would have* crossed the plate had it continued on a constant-acceleration trajectory from commit time forward. The gap between this projected location and the actual plate crossing is the post-commit deviation — movement the batter had no time to respond to.
 
-Commit time is set conservatively at 150 ms pre-contact. This understates post-commit movement rather than overstating it, ensuring any measured distortion effect is a lower bound.
+Commit time is set conservatively at 150 ms pre-contact to understate rather than overstate late movement. The robustness grid over 125–200 ms treats this as a sensitivity check.
 
-### Step 2 — Batter intended swing (`02_intention_model.py`)
+### Step 2 — Batter intended swing
 
-For each of five swing-shape responses (`vert_attack_angle`, `horz_attack_angle`, `swing_path_tilt`, `bat_speed`, `swing_length`), we fit a Bayesian linear mixed-effects model (ADVI) using:
+For each of five swing-shape responses (vertical and horizontal attack angle, swing path tilt, bat speed, swing length), we fit a Bayesian linear mixed-effects model using pitch location, count, contact timing, and platoon handedness as predictors. Per-batter random effects capture each batter's baseline tendencies and how they adjust under count pressure.
 
-- Pitch location and height
-- Ball-strike count
-- Contact timing
-- Platoon handedness
+The residual — realized minus predicted — is the swing deviation used as the mediator in Step 3.
 
-Random effects capture each batter's baseline swing tendency and how they adjust under count pressure. The residual — realized minus predicted — is the swing deviation used as the mediator in Step 3.
+### Step 3 — Run-value mediation
 
-### Step 3 — Run-value mediation (`03_causal_models.py`)
+**Mediator models** estimate how much of each angular swing deviation is mechanically caused by post-commit movement. The treatment coefficients give the causal leverage — how many degrees of swing deviation does one foot of late movement produce.
 
-**Mediator models** estimate how much of each swing deviation is mechanically caused by post-commit movement, using the treatment (post-commit deviation) and pre-commit projected location as predictors.
+**Outcome models** price swing deviation in run value via three channels: P(ball in play), P(foul | not in play), and E[xwOBA | ball in play]. Foul and whiff are modeled separately because at two strikes a foul keeps the at-bat alive while a whiff ends it.
 
-**Outcome models** price swing deviation in run value via three contact channels:
-
-- P(ball in play) — logistic regression
-- P(foul | not in play) — logistic regression on non-BIP swings (kept separate from whiff because at two strikes, a foul keeps the at-bat alive while a whiff ends it)
-- E[xwOBA | ball in play] — OLS on balls in play
-
-**Composite expected run value:**
-```
-xRV = P(BIP) · E[xwOBA|BIP] + P(foul) · foul_rv[count] + P(whiff) · whiff_rv[count]
-```
-
-**Disruption tax** uses a three-scenario counterfactual. We evaluate xRV three times per swing:
+**Disruption tax** uses three counterfactual scenarios:
 
 | Scenario | Swing angles | Plate location |
 |----------|-------------|----------------|
@@ -89,18 +74,9 @@ xRV = P(BIP) · E[xwOBA|BIP] + P(foul) · foul_rv[count] + P(whiff) · whiff_rv[
 | Spatial only | zero deviations | actual (post-movement) |
 | Intended | zero deviations | projected (pre-movement) |
 
-```
-disruption_tax       = xRV(realized)  − xRV(intended)
-spatial_distortion   = xRV(spatial)   − xRV(intended)   # cost of location shift alone
-angular_disruption   = xRV(realized)  − xRV(spatial)    # cost of swing-plane deviation on top
-```
+This lets us decompose the total disruption tax into spatial distortion (the ball ended up somewhere different than the batter expected) and angular disruption (the batter's swing plane was knocked off-target). The angular component is further split by how much was mechanically caused by movement vs. the batter's own decision.
 
-The angular component is further split by how much of the deviation was mechanically caused by movement vs. the batter's own decision, using squared-norm decomposition across the three angular axes. Spatial disruption is fully attributed to distortion by construction.
-
-```
-distortion_tax = spatial_distortion + angular_disruption × angular_distortion_share
-selection_tax  = angular_disruption × (1 − angular_distortion_share)
-```
+The pipeline also computes **physical miss** (bat-to-ball contact quality degradation from late movement) and **decision cost** (opportunity cost of swinging vs. taking at the projected location).
 
 ---
 
@@ -123,14 +99,14 @@ Core packages: `bambi`, `pymc`, `statsmodels`, `pandas`, `numpy`, `matplotlib`, 
 
 ---
 
-## Kinematic diagrams (`results_scripts/06_kinematic_diagram.py`)
+## Kinematic diagrams
 
 Each figure is a two-panel broadcast card: game screenshot with arrow callout (left) + dark metrics panel (right). The **DISRUPTION ANALYSIS** section shows:
 
-- **Post-commit drop** — vertical inches the ball moves after the batter commits (~150 ms pre-contact). Movement the batter cannot react to; a splitter dropping 6" post-commit means the swing plane was set 6" too high through no fault of their read.
-- **Proj. → actual** — the ball's projected plate-crossing height (what the batter's brain used to set swing plane) vs. its actual height after late movement. The parenthetical notes whether the projected location was already above or below the strike zone before any late break.
-- **Disruption tax** — run-value cost of the swing deviation, in runs (negative = pitcher advantage). Computed by predicting xRV twice — once with actual swing deviations, once with all deviations zeroed — and taking the difference.
-- **Distortion / Selection bar** — fraction of disruption caused by post-commit movement (distortion, red) vs. the batter's own decision (selection, amber).
+- **Post-commit drop** — vertical inches the ball moves after the batter commits. Movement the batter cannot react to.
+- **Proj. → actual** — the ball's projected vs. actual plate-crossing height. The gap is the spatial displacement the batter's brain never saw.
+- **Disruption tax** — total run-value cost of swing disruption (negative = pitcher advantage).
+- **Distortion / Selection bar** — fraction caused by post-commit movement (red) vs. the batter's own decision (amber).
 
 | Pitcher / Batter | Pitch | Dominant cause |
 |-----------------|-------|----------------|
