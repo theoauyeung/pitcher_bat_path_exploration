@@ -43,9 +43,14 @@ by_pitch <- df |>
   group_by(pitcher_id, pitcher_full_name, pitch_type) |>
   summarise(
     Pitches    = n(),
-    xRV        = round(mean(disruption_tax, na.rm = TRUE), 3),
-    Distortion = round(mean(distortion_tax,  na.rm = TRUE), 3),
-    Selection  = round(mean(selection_tax,   na.rm = TRUE), 3),
+    xRV        = round(mean(disruption_tax,          na.rm = TRUE), 3),
+    AdjXRV     = round(mean(adjusted_disruption_tax, na.rm = TRUE), 3),
+    Distortion = round(mean(distortion_tax,           na.rm = TRUE), 3),
+    Selection  = round(mean(selection_tax,            na.rm = TRUE), 3),
+    MissTax    = round(mean(miss_distortion_tax,      na.rm = TRUE), 3),
+    # decision_cost: positive = taking was better (batter chased). Reported as
+    # a positive "Chase" number so higher = more batter mistakes on these pitches.
+    Chase      = round(mean(decision_cost,            na.rm = TRUE), 3),
     .groups = "drop"
   ) |>
   filter(Pitches >= 100) |>
@@ -53,6 +58,7 @@ by_pitch <- df |>
     pitch_label    = coalesce(PITCH_LABELS[pitch_type], pitch_type),
     # Inverted percentile ranks on full dataset: 100 = best (lowest raw value)
     xRV_pct        = as.integer(round((n() + 1 - rank(xRV))        / n() * 100)),
+    adjxrv_pct     = as.integer(round((n() + 1 - rank(AdjXRV))     / n() * 100)),
     distortion_pct = as.integer(round((n() + 1 - rank(Distortion)) / n() * 100))
   )
 
@@ -85,15 +91,17 @@ save_png <- function(tbl, path) {
   )
 }
 
-# ── Table 1: top 18 by xRV Residual percentile ────────────────────────────────
+# ── Table 1: top 18 by Adjusted xRV percentile ────────────────────────────────
+# AdjXRV = disruption_tax − max(0, decision_cost): total burden vs. optimal action.
+# Chase > 0 means batters were better off taking the pitch at the projected location.
 
 top18_xrv <- by_pitch |>
-  arrange(xRV) |>
+  arrange(AdjXRV) |>
   slice_head(n = 18)
 
 tbl_xrv <- top18_xrv |>
   select(pitcher_id, pitcher_full_name, pitch_label, Pitches,
-         xRV_pct, Distortion, Selection) |>
+         adjxrv_pct, xRV, AdjXRV, Chase) |>
   gt() |>
   gt_fmt_mlb_headshot(columns = pitcher_id, height = 35) |>
   cols_label(
@@ -101,27 +109,33 @@ tbl_xrv <- top18_xrv |>
     pitcher_full_name = "Pitcher",
     pitch_label       = "Pitch",
     Pitches           = "Pitches",
-    xRV_pct          = "xRV Residual Pctile",
-    Distortion        = "Distortion Tax",
-    Selection         = "Selection Tax"
+    adjxrv_pct        = "Adj. xRV Pctile",
+    xRV               = "Swing Disruption",
+    AdjXRV            = "Total Burden",
+    Chase             = "Chase Cost"
   ) |>
   data_color(
-    columns = xRV_pct,
+    columns = adjxrv_pct,
     fn      = PCT_PAL
   ) |>
   tab_header(
-    title    = md("**Pitcher xRV Residual Leaderboard**"),
-    subtitle = md("Percentile rank among all pitchers with ≥100 pitches  ·  2023–2025")
+    title    = md("**Pitcher Total Burden Leaderboard**"),
+    subtitle = md("Sorted by Adjusted xRV (swing disruption + chase penalty)  ·  ≥100 pitches  ·  2023–2025")
   ) |>
   tab_footnote(
-    footnote  = "xRV Residual Pctile: percentile rank (100 = best) for total swing-disruption cost across all qualifying pitcher–pitch combos.",
-    locations = cells_column_labels(xRV_pct)
+    footnote  = "Total Burden (Adj. xRV): disruption_tax − max(0, decision_cost). When taking was better, baseline shifts to take value. Negative = pitcher advantage.",
+    locations = cells_column_labels(AdjXRV)
+  ) |>
+  tab_footnote(
+    footnote  = "Chase Cost: mean decision_cost per swing. Positive = batters were better off taking the pitch at its projected location.",
+    locations = cells_column_labels(Chase)
   ) |>
   apply_style()
 
-save_png(tbl_xrv, "results/figures/leaderboard_by_pitch.png")
+save_png(tbl_xrv, "results/figures/leaderboard_total_burden.png")
 
 # ── Table 2: top 18 by Distortion Tax percentile ──────────────────────────────
+# MissTax: physical bat-to-ball miss channel — independent corroboration of Distortion.
 
 top18_dist <- by_pitch |>
   arrange(Distortion) |>
@@ -129,7 +143,7 @@ top18_dist <- by_pitch |>
 
 tbl_dist <- top18_dist |>
   select(pitcher_id, pitcher_full_name, pitch_label, Pitches,
-         xRV, distortion_pct, Selection) |>
+         distortion_pct, Distortion, MissTax, AdjXRV) |>
   gt() |>
   gt_fmt_mlb_headshot(columns = pitcher_id, height = 35) |>
   cols_label(
@@ -137,9 +151,10 @@ tbl_dist <- top18_dist |>
     pitcher_full_name = "Pitcher",
     pitch_label       = "Pitch",
     Pitches           = "Pitches",
-    xRV               = "xRV Residual",
-    distortion_pct    = "Distortion Tax Pctile",
-    Selection         = "Selection Tax"
+    distortion_pct    = "Distortion Pctile",
+    Distortion        = "Distortion Tax",
+    MissTax           = "Physical Miss Tax",
+    AdjXRV            = "Total Burden"
   ) |>
   data_color(
     columns = distortion_pct,
@@ -147,11 +162,15 @@ tbl_dist <- top18_dist |>
   ) |>
   tab_header(
     title    = md("**Pitcher Distortion Tax Leaderboard**"),
-    subtitle = md("Percentile rank among all pitchers with ≥100 pitches  ·  2023–2025")
+    subtitle = md("Movement-caused swing deviation cost  ·  ≥100 pitches  ·  2023–2025")
   ) |>
   tab_footnote(
     footnote  = "Distortion Tax Pctile: percentile rank (100 = best) for movement-caused swing deviation cost.",
     locations = cells_column_labels(distortion_pct)
+  ) |>
+  tab_footnote(
+    footnote  = "Physical Miss Tax: run-value cost from movement-caused increase in bat-to-ball distance. Negative = pitcher advantage. Independent of angular-deviation channel.",
+    locations = cells_column_labels(MissTax)
   ) |>
   apply_style()
 
