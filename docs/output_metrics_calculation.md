@@ -34,13 +34,14 @@ Phase B (03_causal_models.py)
 | $b_i$, $s_i$ | `balls`, `strikes` | Count state |
 | $x_i$, $z_i$ | `plate_x`, `plate_z` | Actual plate crossing (post-movement) |
 | $\tilde{x}_i$, $\tilde{z}_i$ | `pc{ms}_x_proj`, `pc{ms}_z_proj` | Pre-commit projected plate location |
-| $d_{x,i}$, $d_{z,i}$ | `pc{ms}_dev_x`, `pc{ms}_dev_z` | Post-commit movement ($= x_i - \tilde{x}_i$, $z_i - \tilde{z}_i$) |
+| $d_{x,i}$, $d_{z,i}$ | `pc{ms}_dev_x`, `pc{ms}_dev_z` | Post-commit movement: $x_i - \tilde{x}_i$ and $z_i - \tilde{z}_i$ |
 | $\Delta_i^{(m)}$ | `{metric}_dev` | Angular swing deviation from Phase A |
 | $\hat{\Delta}_i^{(m)}$ | `distortion_dev_{m}` | Movement-caused component of $\Delta_i^{(m)}$ |
 | $a_{x,m}$, $a_{z,m}$ | — | Mediator model treatment coefficients for axis $m$ |
 | $\rho_i$ | `angular_distortion_share` | Fraction of angular deviation caused by movement |
 | $\sigma(\cdot)$ | — | Logistic sigmoid: $\sigma(x) = (1+e^{-x})^{-1}$ |
 | $\kappa$ | — | `miss_rv_slope` $\approx -0.014$ runs/inch |
+| $R_i^\text{take}$ | internal `take_xRV` | Expected run value of taking the pitch at projected location |
 | $c_i$ | `decision_cost` | Opportunity cost of swinging vs. taking |
 
 ---
@@ -97,14 +98,16 @@ $\widehat{\text{xRV}}_i^\text{intended}$ is never written to the output parquet 
 
 ## Step 3 — disruption_tax and spatial_distortion_tax
 
+**`disruption_tax`** — total run-value cost vs. the intended-swing-at-projected-location baseline:
+
 $$
 \tau_{\text{total},i} = \widehat{\text{xRV}}_i^\text{realized} - \widehat{\text{xRV}}_i^\text{intended}
-\tag{\texttt{disruption\_tax}}
 $$
+
+**`spatial_distortion_tax`** — cost of spatial displacement alone, with a perfect swing:
 
 $$
 \tau_{\text{spatial},i} = \widehat{\text{xRV}}_i^\text{spatial} - \widehat{\text{xRV}}_i^\text{intended}
-\tag{\texttt{spatial\_distortion\_tax}}
 $$
 
 Internal intermediate (not written to parquet):
@@ -125,30 +128,30 @@ $$
 \hat{\Delta}_i^{(m)} = a_{x,m}\, d_{x,i} + a_{z,m}\, d_{z,i}
 $$
 
-**Angular distortion share** — fraction of total angular deviation explained by movement:
+**`angular_distortion_share`** — fraction of total angular deviation explained by movement:
 
 $$
 \rho_i = \text{clip}\!\left(\frac{\displaystyle\sum_{m} \bigl(\hat{\Delta}_i^{(m)}\bigr)^2}{\displaystyle\sum_{m} \bigl(\Delta_i^{(m)}\bigr)^2},\; 0,\; 1\right)
-\tag{\texttt{angular\_distortion\_share}}
 $$
 
 $\rho_i = \text{NaN}$ when $\sum_m (\Delta_i^{(m)})^2 < 10^{-8}$.
 
-**Final tax split:**
+**`distortion_tax`:**
 
 $$
 \tau_{\text{dist},i} = \tau_{\text{spatial},i} + \tau_{\text{angular},i} \cdot \rho_i
-\tag{\texttt{distortion\_tax}}
 $$
+
+**`selection_tax`:**
 
 $$
 \tau_{\text{sel},i} = \tau_{\text{angular},i} \cdot (1 - \rho_i)
-\tag{\texttt{selection\_tax}}
 $$
+
+**`distortion_share`:**
 
 $$
 \phi_i = \text{clip}\!\left(\frac{\tau_{\text{dist},i}}{\tau_{\text{total},i}},\; 0,\; 1\right)
-\tag{\texttt{distortion\_share}}
 $$
 
 **Additive invariant**: $\tau_{\text{dist},i} + \tau_{\text{sel},i} = \tau_{\text{total},i}$ exactly.
@@ -163,17 +166,17 @@ $$
 \mu_i^\text{mvt} = a_x\, d_{x,i} + a_z\, d_{z,i}
 $$
 
-**Whiff rows** (requires non-null `ball_bat_miss`):
+**Whiff rows** $\tau_{\text{miss},i}$ (requires non-null `ball_bat_miss`):
 
 $$
 f_i = \text{clip}\!\left(\frac{\mu_i^\text{mvt}}{\mu_i^\text{whiff}},\; 0,\; 1\right), \qquad
-\text{miss\_distortion\_tax}_i = f_i \cdot r^\text{whiff}_{b_i,s_i}
+\tau_{\text{miss},i} = f_i \cdot r^\text{whiff}_{b_i,s_i}
 $$
 
-**Contact rows**:
+**Contact rows** $\tau_{\text{miss},i}$:
 
 $$
-\text{miss\_distortion\_tax}_i = \mu_i^\text{mvt} \cdot \kappa
+\tau_{\text{miss},i} = \mu_i^\text{mvt} \cdot \kappa
 $$
 
 where $\kappa \approx -0.014$ runs/inch (estimated from OLS of `delta_run_exp` on `contact_miss`). Negative result = pitcher advantage.
@@ -200,15 +203,16 @@ $$
 r^\text{ball}_{b,s} = \begin{cases} \text{ERV}(b+1,s) - \text{ERV}(b,s) & b < 3 \\ 0.33 - \text{ERV}(3,s) & b = 3 \end{cases}
 $$
 
-**Take value and decision cost:**
+**Take value** $R_i^\text{take}$:
 
 $$
-\text{take\_xRV}_i = P_{\text{str},i} \cdot r^\text{cs}_{b_i,s_i} + (1-P_{\text{str},i}) \cdot r^\text{ball}_{b_i,s_i}
+R_i^\text{take} = P_{\text{str},i} \cdot r^\text{cs}_{b_i,s_i} + (1-P_{\text{str},i}) \cdot r^\text{ball}_{b_i,s_i}
 $$
 
+**`decision_cost`:**
+
 $$
-c_i = \text{take\_xRV}_i - \widehat{\text{xRV}}_i^\text{intended}
-\tag{\texttt{decision\_cost}}
+c_i = R_i^\text{take} - \widehat{\text{xRV}}_i^\text{intended}
 $$
 
 $c_i > 0$: taking was better. $c_i < 0$: swinging was correct.
@@ -217,12 +221,13 @@ $c_i > 0$: taking was better. $c_i < 0$: swinging was correct.
 
 ## Step 7 — adjusted_disruption_tax
 
+**`adjusted_disruption_tax`:**
+
 $$
 \tau_{\text{adj},i} = \tau_{\text{total},i} - \max(0,\; c_i)
-\tag{\texttt{adjusted\_disruption\_tax}}
 $$
 
-When $c_i \leq 0$: $\tau_{\text{adj},i} = \tau_{\text{total},i}$. When $c_i > 0$: the baseline shifts to $\text{take\_xRV}_i$ and the full cost of swinging at a bad pitch is captured.
+When $c_i \leq 0$: $\tau_{\text{adj},i} = \tau_{\text{total},i}$. When $c_i > 0$: the baseline shifts to $R_i^\text{take}$ and the full cost of swinging at a bad pitch is captured.
 
 $\tau_{\text{adj},i} \leq \tau_{\text{total},i}$ always.
 
@@ -238,10 +243,11 @@ $\tau_{\text{adj},i} \leq \tau_{\text{total},i}$ always.
 | `selection_tax` | Negative when deviation hurts | $\tau_\text{angular} \cdot (1 - \rho)$ |
 | `distortion_share` | — | $\text{clip}(\tau_\text{dist} / \tau_\text{total},\, 0,\, 1)$ |
 | `miss_distortion_tax` | Negative = pitcher advantage | Whiff: $f \cdot r^\text{whiff}$; Contact: $\mu^\text{mvt} \cdot \kappa$ |
-| `decision_cost` | Positive = should have taken | $\text{take\_xRV} - \widehat{\text{xRV}}^\text{intended}$ |
+| `decision_cost` | Positive = should have taken | $R^\text{take} - \widehat{\text{xRV}}^\text{intended}$ |
 | `adjusted_disruption_tax` | Negative = pitcher advantage | $\tau_\text{total} - \max(0, c)$ |
 
 **Additive invariants:**
+
 - $\tau_\text{dist} + \tau_\text{sel} = \tau_\text{total}$
 - $\tau_\text{adj} = \tau_\text{total}$ when $c \leq 0$
 - $\tau_\text{adj} \leq \tau_\text{total}$ always
@@ -258,7 +264,7 @@ Aggregated over swings where `distortion_tax` is non-null, minimum 50 swings per
 | `mean_distortion_tax` | $\bar{\tau}_\text{dist}$ |
 | `mean_selection_tax` | $\bar{\tau}_\text{sel}$ |
 | `mean_adjusted_disruption_tax` | $\bar{\tau}_\text{adj}$ |
-| `mean_miss_distortion_tax` | $\overline{\text{miss\_dist\_tax}}$ |
+| `mean_miss_distortion_tax` | $\bar{\tau}_\text{miss}$ |
 | `mean_decision_cost` | $\bar{c}$ |
 | `mean_distortion_share` | $\bar{\phi}$ |
 | `n_swings` | count |
