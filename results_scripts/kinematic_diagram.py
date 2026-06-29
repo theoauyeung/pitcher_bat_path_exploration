@@ -376,23 +376,10 @@ def make_broadcast_annotation(
 
 # ── Screenshot paths ──────────────────────────────────────────────────────────
 
-_YB_SCREENSHOT = (
-    r"C:\Users\theo.an-yeung\.claude\image-cache"
-    r"\9ab172b7-50ea-4b14-b5b0-382bc2609733\1.png"
-)
-
-_LR_SCREENSHOT = (
-    r"C:\Users\theo.an-yeung\.claude\image-cache"
-    r"\62772796-c27d-41a6-9aa9-41862e55f103\2.png"
-)
-_HM_SCREENSHOT = (
-    r"C:\Users\theo.an-yeung\.claude\image-cache"
-    r"\62772796-c27d-41a6-9aa9-41862e55f103\3.jpeg"
-)
-_SH_SCREENSHOT = (
-    r"C:\Users\theo.an-yeung\.claude\image-cache"
-    r"\62772796-c27d-41a6-9aa9-41862e55f103\4.png"
-)
+_YB_SCREENSHOT = r"screenshots for kin diagrams\Screenshot 2026-06-22 100819.png"
+_LR_SCREENSHOT = r"screenshots for kin diagrams\Screenshot 2026-06-23 102000.png"
+_HM_SCREENSHOT = r"screenshots for kin diagrams\Screenshot 2026-06-23 104858.png"
+_SH_SCREENSHOT = r"screenshots for kin diagrams\Screenshot 2026-06-23 105031.png"
 
 
 # ── Load metrics from data ────────────────────────────────────────────────────
