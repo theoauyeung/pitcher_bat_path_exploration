@@ -2,7 +2,7 @@
 
 ## Motivation
 
-`disruption_tax` is computed as `xRV(realized swing) − xRV(intended swing)` conditional on swinging. This creates two problems:
+`disruption_tax` is computed as $\widehat{\text{xRV}}(\text{realized}) - \widehat{\text{xRV}}(\text{intended})$ conditional on swinging. This creates two problems:
 
 1. **Positive disruption_tax on whiffs** — When a batter adapts mechanics to a pitch outside the zone (e.g. pulling swing up toward a high fastball), the outcome models can rate that adaptation as *better* than the intention baseline, yielding positive disruption_tax even on strikeouts. This is a model artifact from the intention model's baseline being misspecified at extreme pitch locations.
 
@@ -26,207 +26,188 @@
 
 ## 1. Miss models
 
-### Whiff miss model
-
-Predicts total bat-to-ball separation (inches) on whiff swings from post-commit movement and other factors:
-
-```
-ball_bat_miss_i = α₀
-               + α₁ · pc_dev_x_i
-               + α₂ · pc_dev_z_i
-               + α₃ · x_proj_i
-               + α₄ · z_proj_i
-               + α₅ · vert_attack_angle_dev_i
-               + α₆ · horz_attack_angle_dev_i
-               + α₇ · swing_path_tilt_dev_i
-               + α₈ · balls_i
-               + α₉ · strikes_i
-               + εᵢ
-```
-
-Fit on whiff rows where `ball_bat_miss` is non-null (~91% coverage, ~175k rows). OLS with HC1 robust standard errors.
-
-### Contact miss model
-
-Predicts geometric off-center contact distance (inches) on contacts:
-
-```
-contact_miss_i = sqrt(offset_z_in_i²  +  offset_x_in_i²)
-
-contact_miss_i = α₀
-               + α₁ · pc_dev_x_i
-               + α₂ · pc_dev_z_i
-               + α₃ · x_proj_i
-               + α₄ · z_proj_i
-               + α₅ · vert_attack_angle_dev_i
-               + α₆ · horz_attack_angle_dev_i
-               + α₇ · swing_path_tilt_dev_i
-               + α₈ · balls_i
-               + α₉ · strikes_i
-               + εᵢ
-```
-
-Fit on contact rows where `|offset_x_in| ≤ 20` (~89% coverage). OLS with HC1 robust standard errors.
-
-### Variable definitions (both miss models)
+### Symbol definitions
 
 | Symbol | Column | Units | Description |
 |--------|--------|-------|-------------|
-| `ball_bat_miss_i` | `ball_bat_miss` | inches | Bat-to-ball separation at contact (Hawk-Eye measured) |
-| `contact_miss_i` | derived | inches | Euclidean distance from bat sweet spot to ball |
-| `offset_z_in_i` | `offset_z_in` | inches | Vertical offset from bat center at contact |
-| `offset_x_in_i` | `offset_x_in` | inches | Horizontal offset from bat center at contact |
-| `pc_dev_x_i` | `pc{ms}_dev_x` | feet | Post-commit horizontal movement |
-| `pc_dev_z_i` | `pc{ms}_dev_z` | feet | Post-commit vertical movement |
-| `x_proj_i` | `pc{ms}_x_proj` | feet | Pre-commit projected plate x |
-| `z_proj_i` | `pc{ms}_z_proj` | feet | Pre-commit projected plate z |
-| `{metric}_dev_i` | `{metric}_dev` | degrees | Angular swing deviation from Phase A |
-| `balls_i`, `strikes_i` | `balls`, `strikes` | count | Count state |
+| $\mu_i^\text{whiff}$ | `ball_bat_miss` | in | Bat-to-ball separation at contact (Hawk-Eye measured); whiff rows only |
+| $\mu_i^\text{contact}$ | derived | in | Geometric off-center distance: $\sqrt{\text{offset\_z\_in}_i^2 + \text{offset\_x\_in}_i^2}$ |
+| $d_{x,i}$ | `pc{ms}_dev_x` | ft | Post-commit horizontal movement |
+| $d_{z,i}$ | `pc{ms}_dev_z` | ft | Post-commit vertical movement |
+| $\tilde{x}_i$, $\tilde{z}_i$ | `pc{ms}_x_proj`, `pc{ms}_z_proj` | ft | Pre-commit projected plate location |
+| $\Delta_i^{(m)}$ | `{metric}_dev` | ° | Angular swing deviations from Phase A |
+| $b_i$, $s_i$ | `balls`, `strikes` | count | Count state |
+
+### Whiff miss model
+
+Predicts total bat-to-ball separation on whiff rows. Fit on swings with non-null `ball_bat_miss` (~91% of whiffs, ~175k rows). OLS with HC1 robust standard errors.
+
+$$
+\begin{aligned}
+\mu_i^\text{whiff} &= \alpha_0 \\
+                   &+ \alpha_1\, d_{x,i} + \alpha_2\, d_{z,i} \\
+                   &+ \alpha_3\, \tilde{x}_i + \alpha_4\, \tilde{z}_i \\
+                   &+ \alpha_5\, \Delta_i^{(\text{VAA})} + \alpha_6\, \Delta_i^{(\text{HAA})} + \alpha_7\, \Delta_i^{(\text{tilt})} \\
+                   &+ \alpha_8\, b_i + \alpha_9\, s_i + \varepsilon_i
+\end{aligned}
+$$
+
+### Contact miss model
+
+Predicts geometric off-center contact distance on contact rows where $|\text{offset\_x\_in}| \leq 20$. Same right-hand side as the whiff model. OLS with HC1 robust standard errors.
+
+$$
+\mu_i^\text{contact} = \sqrt{\text{offset\_z\_in}_i^2 + \text{offset\_x\_in}_i^2}
+$$
+
+$$
+\begin{aligned}
+\mu_i^\text{contact} &= \alpha_0 \\
+                     &+ \alpha_1\, d_{x,i} + \alpha_2\, d_{z,i} \\
+                     &+ \alpha_3\, \tilde{x}_i + \alpha_4\, \tilde{z}_i \\
+                     &+ \alpha_5\, \Delta_i^{(\text{VAA})} + \alpha_6\, \Delta_i^{(\text{HAA})} + \alpha_7\, \Delta_i^{(\text{tilt})} \\
+                     &+ \alpha_8\, b_i + \alpha_9\, s_i + \varepsilon_i
+\end{aligned}
+$$
 
 ### Miss-to-xRV slope
 
-A second OLS step converts contact miss to run value:
+A second OLS step on contact rows converts contact miss distance into run-value units:
 
-```
-delta_run_exp_i = γ₀  +  γ₁ · contact_miss_i  +  Σ_c γ_c · I(count_i = c)  +  εᵢ
+$$
+\text{delta\_run\_exp}_i = \gamma_0 + \gamma_1\, \mu_i^\text{contact} + \sum_c \gamma_c\, \mathbf{1}[\text{count}_i = c] + \varepsilon_i
+$$
 
-miss_rv_slope = γ₁   (≈ −0.014 runs/inch)
-```
+$$
+\kappa = \hat{\gamma}_1 \approx -0.014 \text{ runs/inch}
+$$
 
-`miss_rv_slope` is negative — more off-center contact produces fewer runs for the batter.
+$\kappa < 0$: more off-center contact → fewer runs for the batter.
 
 ---
 
 ## 2. Per-swing miss distortion tax
 
+### Movement-caused miss
+
+For both miss model types, the movement-caused component is the inner product of post-commit movement with the model's treatment coefficients:
+
+$$
+\mu_i^\text{mvt} = a_{x}\, d_{x,i} + a_{z}\, d_{z,i}
+$$
+
+where $a_x$ and $a_z$ come from the whiff miss model (whiff rows) or contact miss model (contact rows).
+
 ### Whiff rows
 
-Movement-caused miss is the projection of post-commit movement onto the miss dimension via the whiff model coefficients:
+$$
+f_i = \text{clip}\!\left(\frac{\mu_i^\text{mvt}}{\mu_i^\text{whiff}},\; 0,\; 1\right)
+$$
 
-```
-movement_miss_i = a_x · pc_dev_x_i  +  a_z · pc_dev_z_i
-
-movement_miss_frac_i = clip(movement_miss_i / ball_bat_miss_i,  0,  1)
-
-miss_distortion_tax_i = movement_miss_frac_i × whiff_rv[balls_i, strikes_i]
-```
+$$
+\text{miss\_distortion\_tax}_i = f_i \cdot r^\text{whiff}_{b_i, s_i}
+$$
 
 | Symbol | Description |
 |--------|-------------|
-| `a_x` | `whiff_miss_model.params['pc{ms}_dev_x']` — inches of bat-to-ball miss per foot of horizontal movement |
-| `a_z` | `whiff_miss_model.params['pc{ms}_dev_z']` — inches of bat-to-ball miss per foot of vertical movement |
-| `movement_miss_i` | Portion of bat-to-ball miss attributable to post-commit movement (inches) |
-| `movement_miss_frac_i` | Fraction of total measured miss caused by movement; clipped to [0, 1] |
-| `whiff_rv[b, s]` | Count-adjusted run value of a whiff at (balls=b, strikes=s) |
+| $f_i$ | Fraction of total bat-to-ball miss attributable to post-commit movement; clipped to $[0,1]$ |
+| $r^\text{whiff}_{b,s}$ | Count-adjusted run value of a whiff at count $(b, s)$ |
 
 NaN when `ball_bat_miss` is missing (~9% of whiff rows).
 
 ### Contact rows
 
-For contacts, the miss is continuous and priced directly through the run-value slope:
+$$
+\text{miss\_distortion\_tax}_i = \mu_i^\text{mvt} \cdot \kappa
+$$
 
-```
-movement_miss_i = a_x · pc_dev_x_i  +  a_z · pc_dev_z_i
-
-miss_distortion_tax_i = movement_miss_i × miss_rv_slope
-```
-
-| Symbol | Description |
-|--------|-------------|
-| `a_x` | `contact_miss_model.params['pc{ms}_dev_x']` |
-| `a_z` | `contact_miss_model.params['pc{ms}_dev_z']` |
-| `movement_miss_i` | Movement-caused increase in contact distance (inches) |
-| `miss_rv_slope` | ≈ −0.014 runs/inch; negative means more miss → fewer runs |
+$\kappa \approx -0.014$ runs/inch, so positive $\mu_i^\text{mvt}$ (movement increased miss) → negative tax (pitcher advantage).
 
 ---
 
 ## 3. Decision cost
 
-### Strike probability (parametric strike zone)
+### Strike probability at projected location
 
-```
-P_strike_i = σ(k·(0.83 − x_proj_i)) × σ(k·(0.83 + x_proj_i)) × σ(k·(z_proj_i − sz_bot_i)) × σ(k·(sz_top_i − z_proj_i))
-```
+$$
+P_{\text{str},i} = \sigma\!\bigl(k(0.83 - \tilde{x}_i)\bigr) \cdot \sigma\!\bigl(k(0.83 + \tilde{x}_i)\bigr) \cdot \sigma\!\bigl(k(\tilde{z}_i - z_{\text{bot},i})\bigr) \cdot \sigma\!\bigl(k(z_{\text{top},i} - \tilde{z}_i)\bigr)
+$$
 
-| Symbol | Description |
-|--------|-------------|
-| `σ(·)` | Logistic sigmoid: σ(x) = 1 / (1 + exp(−x)) |
-| `k = 8.0` | Sharpness parameter — gives ~5%→95% transition over ≈0.3 ft around zone boundary |
-| `x_proj_i` | Pre-commit projected plate x (feet) — the location the batter's decision was based on |
-| `z_proj_i` | Pre-commit projected plate z (feet) |
-| `sz_top_i` | Top of the strike zone for this batter (feet); default 3.5 if missing |
-| `sz_bot_i` | Bottom of the strike zone (feet); default 1.5 if missing |
-| `0.83` | Half-width of the strike zone in feet (~9.95 inches, accounting for ball diameter) |
+where $\sigma(x) = (1 + e^{-x})^{-1}$ is the logistic sigmoid and $k = 8$.
+
+| Symbol | Column | Description |
+|--------|--------|-------------|
+| $\tilde{x}_i$ | `pc{ms}_x_proj` | Pre-commit projected plate x (ft) |
+| $\tilde{z}_i$ | `pc{ms}_z_proj` | Pre-commit projected plate z (ft) |
+| $z_{\text{top},i}$ | `sz_top` | Top of batter's strike zone (ft); default 3.5 if missing |
+| $z_{\text{bot},i}$ | `sz_bot` | Bottom of batter's strike zone (ft); default 1.5 if missing |
+| $0.83$ | — | Half-width of the strike zone in feet (~9.95 in, accounting for ball diameter) |
+| $k = 8$ | — | Sharpness; ~5%→95% transition over ≈0.3 ft around zone boundary |
+
+Evaluated at the **projected** location $(\tilde{x}_i, \tilde{z}_i)$ — the pre-commit location the batter's decision was based on, not the actual post-movement plate crossing.
 
 ### Count transition run values
 
-```
-cs_rv[(b, s)]   = ERV(b, s+1) − ERV(b, s)     for s < 2   [cost of falling behind in count]
-                = 0  −  ERV(b, 2)              for s = 2   [cost of strikeout from two-strike count]
+$$
+r^\text{cs}_{b,s} = \begin{cases}
+\text{ERV}(b,\, s+1) - \text{ERV}(b,\, s) & s < 2 \\
+0 - \text{ERV}(b,\, 2) & s = 2
+\end{cases}
+$$
 
-ball_rv[(b, s)] = ERV(b+1, s) − ERV(b, s)     for b < 3
-                = WALK_RV  −  ERV(3, s)        for b = 3   [walk approximation]
-```
+$$
+r^\text{ball}_{b,s} = \begin{cases}
+\text{ERV}(b+1,\, s) - \text{ERV}(b,\, s) & b < 3 \\
+0.33 - \text{ERV}(3,\, s) & b = 3
+\end{cases}
+$$
 
-| Symbol | Description |
-|--------|-------------|
-| `ERV(b, s)` | Expected run value of count (balls=b, strikes=s), from `count_values.csv` (RE24 framework) |
-| `cs_rv[(b,s)]` | Run value change of a called strike at count (b, s) |
-| `ball_rv[(b,s)]` | Run value change of a ball at count (b, s) |
-| `WALK_RV = 0.33` | Approximate run value of a walk |
+where $\text{ERV}(b, s)$ is the expected run value of count $(b, s)$ from `count_values.csv` (RE24 framework) and $0.33$ approximates the mean run value of a walk.
 
 ### Take value
 
-```
-take_xRV_i = P_strike_i × cs_rv[balls_i, strikes_i]  +  (1 − P_strike_i) × ball_rv[balls_i, strikes_i]
-```
+$$
+\text{take\_xRV}_i = P_{\text{str},i} \cdot r^\text{cs}_{b_i, s_i} + (1 - P_{\text{str},i}) \cdot r^\text{ball}_{b_i, s_i}
+$$
 
-Evaluated at the **projected** plate location (`x_proj`, `z_proj`) — the pre-commit location the batter's decision was based on, not the actual post-movement plate crossing.
+### Decision cost
 
-### Decision cost formula
-
-```
-decision_cost_i = take_xRV_i  −  xrv_intended_i
-```
+$$
+c_i = \text{take\_xRV}_i - \widehat{\text{xRV}}_i^\text{intended}
+$$
 
 | Symbol | Description |
 |--------|-------------|
-| `take_xRV_i` | Expected run value of taking the pitch at its projected location |
-| `xrv_intended_i` | Expected run value of swinging with intended mechanics at projected location (from `disruption_tax_split`; dropped from final parquet output) |
-| `decision_cost_i` | Positive = taking was better; negative = swinging was correct |
+| $\text{take\_xRV}_i$ | Expected run value of taking the pitch at its projected location |
+| $\widehat{\text{xRV}}_i^\text{intended}$ | Expected run value of swinging with intended mechanics at projected location (internal `_xrv_intended` from `disruption_tax_split`) |
+| $c_i$ | `decision_cost`; positive = taking was better; negative = swinging was correct |
 
-**Interpretation**:
-- `decision_cost > 0`: batter chased a bad ball or swung at a tunneled pitch that looked like a strike
-- `decision_cost < 0`: batter attacked a hittable pitch at the projected location (self-selected correctly)
-- Population mean ≈ −0.08 runs — batters self-select into swinging at pitches where swinging is correct
+Population mean $\approx -0.08$ runs — batters self-select into swinging at pitches where swinging is correct.
 
 ---
 
 ## 4. Adjusted disruption tax
 
-```
-adjusted_disruption_tax_i = disruption_tax_i  −  max(0,  decision_cost_i)
-```
+$$
+\tau_{\text{adj},i} = \tau_{\text{total},i} - \max(0,\; c_i)
+$$
 
-| Symbol | Description |
-|--------|-------------|
-| `disruption_tax_i` | xRV cost of post-commit disruption vs. intended swing at projected location |
-| `decision_cost_i` | Opportunity cost of the swing decision itself |
-| `adjusted_disruption_tax_i` | Total batter burden vs. the optimal available action at commit time |
+| Case | Result |
+|------|--------|
+| $c_i \leq 0$ (swinging was correct) | $\tau_{\text{adj},i} = \tau_{\text{total},i}$ |
+| $c_i > 0$ (should have taken) | $\tau_{\text{adj},i} = \tau_{\text{total},i} - c_i$ — baseline shifts to $\text{take\_xRV}_i$ |
 
-**Properties**:
-- When `decision_cost ≤ 0`: swinging was correct → `adjusted_disruption_tax = disruption_tax`
-- When `decision_cost > 0`: taking was better → baseline shifts to `take_xRV`; full swing cost is captured
-- Population mean ≈ −0.012 runs vs. −0.002 for raw `disruption_tax`; 16.2% of swings have `decision_cost > 0`
-- Additive: `adjusted_disruption_tax ≤ disruption_tax` always (equality when swinging was optimal)
+Population mean $\approx -0.012$ runs vs. $-0.002$ for raw $\tau_\text{total}$; 16.2% of swings have $c_i > 0$.
+
+$\tau_{\text{adj},i} \leq \tau_{\text{total},i}$ always. When swinging was optimal ($c_i \leq 0$), equality holds.
 
 ---
 
 ## Caveats
 
-- `miss_distortion_tax` for whiffs requires `ball_bat_miss`; NaN on ~9% of whiff rows where Hawk-Eye data is missing
-- `miss_rv_slope` is estimated from a second OLS step, adding noise relative to a direct counterfactual
-- Positive `decision_cost` doesn't attribute the bad decision to movement — could be pitch-type deception, count-based gambling, etc. Movement attribution would require a fuller causal graph (out of scope)
+- $\text{miss\_distortion\_tax}$ for whiffs requires `ball_bat_miss`; NaN on ~9% of whiff rows where Hawk-Eye data is missing
+- $\kappa$ is estimated from a second OLS step, adding noise relative to a direct counterfactual
+- Positive $c_i$ doesn't attribute the bad decision to movement — could be pitch-type deception, count-based gambling, etc. Movement attribution would require a fuller causal graph (out of scope)
 - Parametric strike zone is less accurate at edges than an empirical model from non-swing data
 
 ---

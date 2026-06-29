@@ -24,246 +24,243 @@ Phase B (03_causal_models.py)
 
 ---
 
-## Step 1 — Intended swing shape (Phase A outputs)
+## Symbol index
 
-For each of the five swing-shape responses, the Bayesian LMM produces a posterior-mean prediction:
-
-```
-intended_{metric}_i = X_i @ β̄  +  Z_batter_i @ ū_batter
-```
-
-- `X_i` includes count, pitch location (batter frame), height quadratic, timing, and handedness interaction — everything the batter could have planned for
-- `Z_batter_i` = `[1, z(strikes_i)]` for the batter-specific intercept and count-pressure slope
-- Pitcher random effects always excluded at prediction time
-
-**Deviation residual (Phase B input)**:
-
-```
-{metric}_dev_i = {metric}_i  −  intended_{metric}_i
-```
-
-This is the swing deviation used as the mediator: how much the batter's realized mechanics differed from their intention.
-
----
-
-## Step 2 — Three counterfactual xRV evaluations
-
-All three use the same composite xRV formula, evaluated at different input conditions:
-
-```
-P(foul_i)  = (1 − P(BIP_i))  ×  P(foul_i | not BIP_i)
-P(whiff_i) = (1 − P(BIP_i))  ×  (1 − P(foul_i | not BIP_i))
-
-xRV_i = P(BIP_i) × E[xwOBA_i | BIP_i]
-      + P(foul_i) × foul_rv[balls_i, strikes_i]
-      + P(whiff_i) × whiff_rv[balls_i, strikes_i]
-```
-
-The three evaluations differ only in what is substituted into the `OUTCOME_FEATURES` vector:
-
-| Evaluation | `plate_x` / `plate_z` | `{metric}_dev` |
-|------------|-----------------------|----------------|
-| `xrv_realized` | actual `plate_x`, `plate_z` | actual deviations |
-| `xrv_spatial` | actual `plate_x`, `plate_z` | 0° for all three axes |
-| `xrv_intended` | projected `x_proj`, `z_proj` | 0° for all three axes |
-
-`xrv_intended` is never written to the output parquet — it is computed internally in `disruption_tax_split` and passed to `compute_decision_cost`, then dropped.
+| Symbol | Column | Description |
+|--------|--------|-------------|
+| $i$ | — | Swing index |
+| $j$ | — | Batter index |
+| $m$ | — | Angular axis index: VAA, HAA, tilt |
+| $b_i$, $s_i$ | `balls`, `strikes` | Count state |
+| $x_i$, $z_i$ | `plate_x`, `plate_z` | Actual plate crossing (post-movement) |
+| $\tilde{x}_i$, $\tilde{z}_i$ | `pc{ms}_x_proj`, `pc{ms}_z_proj` | Pre-commit projected plate location |
+| $d_{x,i}$, $d_{z,i}$ | `pc{ms}_dev_x`, `pc{ms}_dev_z` | Post-commit movement ($= x_i - \tilde{x}_i$, $z_i - \tilde{z}_i$) |
+| $\Delta_i^{(m)}$ | `{metric}_dev` | Angular swing deviation from Phase A |
+| $\hat{\Delta}_i^{(m)}$ | `distortion_dev_{m}` | Movement-caused component of $\Delta_i^{(m)}$ |
+| $a_{x,m}$, $a_{z,m}$ | — | Mediator model treatment coefficients for axis $m$ |
+| $\rho_i$ | `angular_distortion_share` | Fraction of angular deviation caused by movement |
+| $\sigma(\cdot)$ | — | Logistic sigmoid: $\sigma(x) = (1+e^{-x})^{-1}$ |
+| $\kappa$ | — | `miss_rv_slope` $\approx -0.014$ runs/inch |
+| $c_i$ | `decision_cost` | Opportunity cost of swinging vs. taking |
 
 ---
 
-## Step 3 — Primary disruption decomposition
+## Step 1 — Intended swing shape
 
-### disruption_tax
+The Bayesian LMM (Phase A) produces a posterior-mean prediction for each swing:
 
-```
-disruption_tax_i = xrv_realized_i  −  xrv_intended_i
-```
+$$
+\hat{y}_i = \mathbf{x}_i^\top \bar{\boldsymbol{\beta}} + \mathbf{z}_{\text{batter},i}^\top \bar{\mathbf{u}}_j
+$$
 
-Total run-value cost vs. a world where the pitch stayed at its projected location and the batter executed their intended swing. Negative = pitcher advantage.
+$\mathbf{x}_i$ contains count, batter-frame location, timing, and platoon terms. $\mathbf{z}_{\text{batter},i} = [1,\, z(s_i)]$ captures the batter-specific intercept and count-pressure slope. Pitcher random effects are always zero at prediction time.
 
-### spatial_distortion_tax
+**Deviation residual** — the Phase B mediator:
 
-```
-spatial_distortion_tax_i = xrv_spatial_i  −  xrv_intended_i
-```
+$$
+\Delta_i^{(m)} = y_i^\text{realized} - \hat{y}_i^\text{intended}
+$$
 
-Run-value cost attributable solely to the spatial shift in where the ball crossed the plate, holding swing mechanics at intention (zero deviation). Captures the "target moved" channel even when the batter executes perfectly.
-
-### angular_disruption (internal, not in parquet)
-
-```
-angular_disruption_i = xrv_realized_i  −  xrv_spatial_i
-```
-
-Run-value cost from swing mechanics deviating from intention, on top of spatial displacement. Positive when the deviation hurt the batter; negative when it helped.
+Positive = batter executed above their intention on axis $m$.
 
 ---
 
-## Step 4 — Angular distortion / selection split
+## Step 2 — Composite xRV from outcome models
 
-The mediator model coefficients give the causal leverage of movement on each angular axis:
+All three counterfactual evaluations use the same formula. Inputs to the three XGBoost models are drawn from feature vector $\mathbf{f}_i$:
 
-```
-distortion_dev_m_i = a_x_m × pc_dev_x_i  +  a_z_m × pc_dev_z_i
-```
+$$
+\mathbf{f}_i = \bigl[\Delta_i^{(\text{VAA})},\; \Delta_i^{(\text{HAA})},\; \Delta_i^{(\text{tilt})},\; x_i,\; z_i,\; b_i,\; s_i\bigr]
+$$
 
-where `a_x_m` and `a_z_m` are the treatment coefficients from the mediator model for axis m.
+$$
+\begin{aligned}
+P(\text{foul})_i  &= \bigl(1 - \hat{p}_{\text{BIP},i}\bigr) \cdot \hat{p}_{\text{foul}|\lnot\text{BIP},i} \\[4pt]
+P(\text{whiff})_i &= \bigl(1 - \hat{p}_{\text{BIP},i}\bigr) \cdot \bigl(1 - \hat{p}_{\text{foul}|\lnot\text{BIP},i}\bigr) \\[6pt]
+\widehat{\text{xRV}}_i &= \hat{p}_{\text{BIP},i} \cdot \hat{e}_{\text{xwOBA},i}
+                           + P(\text{foul})_i \cdot r^\text{foul}_{b_i,s_i}
+                           + P(\text{whiff})_i \cdot r^\text{whiff}_{b_i,s_i}
+\end{aligned}
+$$
 
-The share of angular deviation explained by movement across all three axes uses a squared-norm decomposition:
+The three counterfactual evaluations differ only in what is placed into $\mathbf{f}_i$:
 
-```
-angular_distortion_share_i = ( Σ_m distortion_dev_m_i² )  /  ( Σ_m m_dev_i² )
-```
+| Evaluation | $\Delta_i^{(m)}$ values | Plate location |
+|------------|------------------------|----------------|
+| **realized** | actual deviations | actual $x_i$, $z_i$ |
+| **spatial** | $0$ for all axes | actual $x_i$, $z_i$ |
+| **intended** | $0$ for all axes | projected $\tilde{x}_i$, $\tilde{z}_i$ |
 
-Clipped to [0, 1]. NaN when the total angular deviation is near zero (Σ_m m_dev² < 1e-8).
-
-### distortion_tax
-
-```
-distortion_tax_i = spatial_distortion_tax_i  +  angular_disruption_i × angular_distortion_share_i
-```
-
-Total run-value cost attributable to post-commit pitch movement: the full spatial channel plus the movement-caused fraction of the angular channel.
-
-### selection_tax
-
-```
-selection_tax_i = angular_disruption_i  ×  (1 − angular_distortion_share_i)
-```
-
-The angular disruption the batter cannot blame on movement — their own swing decision component.
-
-### distortion_share
-
-```
-distortion_share_i = distortion_tax_i  /  disruption_tax_i
-```
-
-Fraction of total disruption attributable to movement. Clipped to [0, 1]; NaN when `|disruption_tax| < 1e-8`.
-
-**Additive invariant**: `distortion_tax + selection_tax = disruption_tax` holds exactly for all non-NaN rows.
+$\widehat{\text{xRV}}_i^\text{intended}$ is never written to the output parquet — it is computed internally and passed to `compute_decision_cost`, then dropped.
 
 ---
 
-## Step 5 — Physical miss channel (miss_distortion_tax)
+## Step 3 — disruption_tax and spatial_distortion_tax
 
-An independent run-value estimate using directly measured bat-to-ball distance rather than the intention model baseline.
+$$
+\tau_{\text{total},i} = \widehat{\text{xRV}}_i^\text{realized} - \widehat{\text{xRV}}_i^\text{intended}
+\tag{\texttt{disruption\_tax}}
+$$
 
-### Movement-caused miss
+$$
+\tau_{\text{spatial},i} = \widehat{\text{xRV}}_i^\text{spatial} - \widehat{\text{xRV}}_i^\text{intended}
+\tag{\texttt{spatial\_distortion\_tax}}
+$$
 
-From the appropriate miss model's treatment coefficients:
+Internal intermediate (not written to parquet):
 
-```
-movement_miss_i = a_x × pc_dev_x_i  +  a_z × pc_dev_z_i
-```
+$$
+\tau_{\text{angular},i} = \widehat{\text{xRV}}_i^\text{realized} - \widehat{\text{xRV}}_i^\text{spatial}
+$$
 
-`a_x`, `a_z` come from the whiff miss model (for whiff rows) or contact miss model (for contact rows).
-
-### miss_distortion_tax calculation
-
-**For whiff rows** (requires `ball_bat_miss` to be non-null):
-
-```
-movement_miss_frac_i = clip(movement_miss_i / ball_bat_miss_i,  0,  1)
-miss_distortion_tax_i = movement_miss_frac_i × whiff_rv[balls_i, strikes_i]
-```
-
-`whiff_rv[b, s]` is the empirical mean `delta_run_exp` on whiffs at count (b, s).
-
-**For contact rows**:
-
-```
-miss_distortion_tax_i = movement_miss_i × miss_rv_slope
-```
-
-`miss_rv_slope ≈ −0.014 runs/inch`, estimated from OLS of `delta_run_exp` on `contact_miss`.
-
-Negative values mean movement caused worse contact for the batter.
+Negative = pitcher advantage in all three.
 
 ---
 
-## Step 6 — Decision cost (decision_cost)
+## Step 4 — Angular distortion / selection attribution
 
-### Strike probability at projected location
+**Movement-caused deviation** on each axis, from the mediator model treatment coefficients:
 
-```
-P_strike_i = σ(8·(0.83 − x_proj_i)) × σ(8·(0.83 + x_proj_i)) × σ(8·(z_proj_i − sz_bot_i)) × σ(8·(sz_top_i − z_proj_i))
-```
+$$
+\hat{\Delta}_i^{(m)} = a_{x,m}\, d_{x,i} + a_{z,m}\, d_{z,i}
+$$
 
-`σ(x) = 1 / (1 + exp(−x))`. Evaluated at the pre-commit projected location — the information the batter had when deciding to swing.
+**Angular distortion share** — fraction of total angular deviation explained by movement:
 
-### Count transition run values (from count_values.csv)
+$$
+\rho_i = \text{clip}\!\left(\frac{\displaystyle\sum_{m} \bigl(\hat{\Delta}_i^{(m)}\bigr)^2}{\displaystyle\sum_{m} \bigl(\Delta_i^{(m)}\bigr)^2},\; 0,\; 1\right)
+\tag{\texttt{angular\_distortion\_share}}
+$$
 
-```
-cs_rv[(b, s)]   = ERV(b, s+1) − ERV(b, s)     s < 2
-                = 0  −  ERV(b, 2)              s = 2
+$\rho_i = \text{NaN}$ when $\sum_m (\Delta_i^{(m)})^2 < 10^{-8}$.
 
-ball_rv[(b, s)] = ERV(b+1, s) − ERV(b, s)     b < 3
-                = 0.33 − ERV(3, s)             b = 3
-```
+**Final tax split:**
 
-### Take value
+$$
+\tau_{\text{dist},i} = \tau_{\text{spatial},i} + \tau_{\text{angular},i} \cdot \rho_i
+\tag{\texttt{distortion\_tax}}
+$$
 
-```
-take_xRV_i = P_strike_i × cs_rv[balls_i, strikes_i]  +  (1 − P_strike_i) × ball_rv[balls_i, strikes_i]
-```
+$$
+\tau_{\text{sel},i} = \tau_{\text{angular},i} \cdot (1 - \rho_i)
+\tag{\texttt{selection\_tax}}
+$$
 
-### decision_cost
+$$
+\phi_i = \text{clip}\!\left(\frac{\tau_{\text{dist},i}}{\tau_{\text{total},i}},\; 0,\; 1\right)
+\tag{\texttt{distortion\_share}}
+$$
 
-```
-decision_cost_i = take_xRV_i  −  xrv_intended_i
-```
-
-Positive: taking was better than swinging. Negative: the swing was correct.
-
----
-
-## Step 7 — Adjusted disruption tax (adjusted_disruption_tax)
-
-```
-adjusted_disruption_tax_i = disruption_tax_i  −  max(0,  decision_cost_i)
-```
-
-- `decision_cost ≤ 0` (swinging was correct): `adjusted_disruption_tax = disruption_tax`
-- `decision_cost > 0` (should have taken): the baseline shifts to `take_xRV`; the full cost of swinging at a bad pitch is captured
-
-This is the comprehensive per-swing burden metric: how much did the batter lose, versus the best action available given only pre-commit information?
+**Additive invariant**: $\tau_{\text{dist},i} + \tau_{\text{sel},i} = \tau_{\text{total},i}$ exactly.
 
 ---
 
-## Summary table — all output columns in xrv_causal.parquet
+## Step 5 — miss_distortion_tax
 
-| Column | Sign (negative = pitcher advantage) | Formula |
-|--------|-------------------------------------|---------|
-| `disruption_tax` | Negative | `xrv_realized − xrv_intended` |
-| `spatial_distortion_tax` | Negative | `xrv_spatial − xrv_intended` |
-| `distortion_tax` | Negative | `spatial_distortion_tax + angular_disruption × angular_distortion_share` |
-| `selection_tax` | Negative when deviation hurts | `angular_disruption × (1 − angular_distortion_share)` |
-| `distortion_share` | — | `distortion_tax / disruption_tax`, clipped [0, 1] |
-| `miss_distortion_tax` | Negative | Whiff: `movement_miss_frac × whiff_rv`; Contact: `movement_miss × miss_rv_slope` |
-| `decision_cost` | Positive = should have taken | `take_xRV − xrv_intended` |
-| `adjusted_disruption_tax` | Negative | `disruption_tax − max(0, decision_cost)` |
+Movement-caused miss from the appropriate miss model's treatment coefficients:
 
-**Additive invariants**:
-- `disruption_tax = distortion_tax + selection_tax`
-- `adjusted_disruption_tax = disruption_tax` when `decision_cost ≤ 0`
-- `adjusted_disruption_tax ≤ disruption_tax` always
+$$
+\mu_i^\text{mvt} = a_x\, d_{x,i} + a_z\, d_{z,i}
+$$
+
+**Whiff rows** (requires non-null `ball_bat_miss`):
+
+$$
+f_i = \text{clip}\!\left(\frac{\mu_i^\text{mvt}}{\mu_i^\text{whiff}},\; 0,\; 1\right), \qquad
+\text{miss\_distortion\_tax}_i = f_i \cdot r^\text{whiff}_{b_i,s_i}
+$$
+
+**Contact rows**:
+
+$$
+\text{miss\_distortion\_tax}_i = \mu_i^\text{mvt} \cdot \kappa
+$$
+
+where $\kappa \approx -0.014$ runs/inch (estimated from OLS of `delta_run_exp` on `contact_miss`). Negative result = pitcher advantage.
+
+---
+
+## Step 6 — decision_cost
+
+**Parametric strike probability at projected location:**
+
+$$
+P_{\text{str},i} = \sigma\!\bigl(k(0.83-\tilde{x}_i)\bigr)\cdot\sigma\!\bigl(k(0.83+\tilde{x}_i)\bigr)\cdot\sigma\!\bigl(k(\tilde{z}_i-z_{\text{bot},i})\bigr)\cdot\sigma\!\bigl(k(z_{\text{top},i}-\tilde{z}_i)\bigr)
+$$
+
+$k = 8$, $\sigma(x) = (1+e^{-x})^{-1}$.
+
+**Count transition run values** (from `count_values.csv`, RE24 framework):
+
+$$
+r^\text{cs}_{b,s} = \begin{cases} \text{ERV}(b,s+1) - \text{ERV}(b,s) & s < 2 \\ -\,\text{ERV}(b,2) & s = 2 \end{cases}
+$$
+
+$$
+r^\text{ball}_{b,s} = \begin{cases} \text{ERV}(b+1,s) - \text{ERV}(b,s) & b < 3 \\ 0.33 - \text{ERV}(3,s) & b = 3 \end{cases}
+$$
+
+**Take value and decision cost:**
+
+$$
+\text{take\_xRV}_i = P_{\text{str},i} \cdot r^\text{cs}_{b_i,s_i} + (1-P_{\text{str},i}) \cdot r^\text{ball}_{b_i,s_i}
+$$
+
+$$
+c_i = \text{take\_xRV}_i - \widehat{\text{xRV}}_i^\text{intended}
+\tag{\texttt{decision\_cost}}
+$$
+
+$c_i > 0$: taking was better. $c_i < 0$: swinging was correct.
+
+---
+
+## Step 7 — adjusted_disruption_tax
+
+$$
+\tau_{\text{adj},i} = \tau_{\text{total},i} - \max(0,\; c_i)
+\tag{\texttt{adjusted\_disruption\_tax}}
+$$
+
+When $c_i \leq 0$: $\tau_{\text{adj},i} = \tau_{\text{total},i}$. When $c_i > 0$: the baseline shifts to $\text{take\_xRV}_i$ and the full cost of swinging at a bad pitch is captured.
+
+$\tau_{\text{adj},i} \leq \tau_{\text{total},i}$ always.
+
+---
+
+## Summary — all output columns
+
+| Column | Sign convention | Formula |
+|--------|----------------|---------|
+| `disruption_tax` | Negative = pitcher advantage | $\widehat{\text{xRV}}^\text{realized} - \widehat{\text{xRV}}^\text{intended}$ |
+| `spatial_distortion_tax` | Negative = pitcher advantage | $\widehat{\text{xRV}}^\text{spatial} - \widehat{\text{xRV}}^\text{intended}$ |
+| `distortion_tax` | Negative = pitcher advantage | $\tau_\text{spatial} + \tau_\text{angular} \cdot \rho$ |
+| `selection_tax` | Negative when deviation hurts | $\tau_\text{angular} \cdot (1 - \rho)$ |
+| `distortion_share` | — | $\text{clip}(\tau_\text{dist} / \tau_\text{total},\, 0,\, 1)$ |
+| `miss_distortion_tax` | Negative = pitcher advantage | Whiff: $f \cdot r^\text{whiff}$; Contact: $\mu^\text{mvt} \cdot \kappa$ |
+| `decision_cost` | Positive = should have taken | $\text{take\_xRV} - \widehat{\text{xRV}}^\text{intended}$ |
+| `adjusted_disruption_tax` | Negative = pitcher advantage | $\tau_\text{total} - \max(0, c)$ |
+
+**Additive invariants:**
+- $\tau_\text{dist} + \tau_\text{sel} = \tau_\text{total}$
+- $\tau_\text{adj} = \tau_\text{total}$ when $c \leq 0$
+- $\tau_\text{adj} \leq \tau_\text{total}$ always
 
 ---
 
 ## Leaderboard aggregation (pitcher/batter CSVs)
 
-Each leaderboard aggregates over swings where `distortion_tax` is non-null, minimum 50 swings:
+Aggregated over swings where `distortion_tax` is non-null, minimum 50 swings per entity:
 
-```
-mean_disruption_tax          = mean(disruption_tax)
-mean_distortion_tax          = mean(distortion_tax)
-mean_selection_tax           = mean(selection_tax)
-mean_adjusted_disruption_tax = mean(adjusted_disruption_tax)
-mean_miss_distortion_tax     = mean(miss_distortion_tax)
-mean_decision_cost           = mean(decision_cost)
-mean_distortion_share        = mean(distortion_share)
-n_swings                     = count
-```
+| Leaderboard column | Formula |
+|--------------------|---------|
+| `mean_disruption_tax` | $\bar{\tau}_\text{total}$ |
+| `mean_distortion_tax` | $\bar{\tau}_\text{dist}$ |
+| `mean_selection_tax` | $\bar{\tau}_\text{sel}$ |
+| `mean_adjusted_disruption_tax` | $\bar{\tau}_\text{adj}$ |
+| `mean_miss_distortion_tax` | $\overline{\text{miss\_dist\_tax}}$ |
+| `mean_decision_cost` | $\bar{c}$ |
+| `mean_distortion_share` | $\bar{\phi}$ |
+| `n_swings` | count |
 
 All means are per-swing (runs/swing), not per-plate-appearance. More negative `mean_distortion_tax` = pitcher induced more disruption per swing.
