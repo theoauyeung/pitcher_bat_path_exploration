@@ -31,7 +31,48 @@ def _has_changes():
     return bool(_git("status", "--porcelain").stdout.strip())
 
 
+def _pull_if_behind():
+    """Fetch origin and rebase if remote has commits we don't have locally.
+
+    Stashes any uncommitted local changes first, rebases onto the remote branch,
+    then pops the stash so local edits survive. Returns True on success.
+    """
+    _git("fetch", "origin")
+    branch = _git("rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+
+    count_result = _git("rev-list", "--count", f"HEAD..origin/{branch}")
+    if count_result.returncode != 0 or count_result.stdout.strip() in ("", "0"):
+        return True  # remote ref doesn't exist yet or already up to date
+
+    n = count_result.stdout.strip()
+    print(f"  remote has {n} new commit(s) on {branch}, pulling first...")
+
+    # Stash local changes (including untracked) so rebase has a clean tree
+    stash = _git("stash", "push", "-u", "-m", "watch_commit: pre-pull")
+    stashed = "Saved" in stash.stdout
+
+    rebase = _git("rebase", f"origin/{branch}")
+    if rebase.returncode != 0:
+        print(f"  rebase failed: {rebase.stderr.strip()}", file=sys.stderr)
+        _git("rebase", "--abort")
+        if stashed:
+            _git("stash", "pop")
+        return False
+
+    if stashed:
+        pop = _git("stash", "pop")
+        if pop.returncode != 0:
+            print(f"  stash pop conflict after pull: {pop.stderr.strip()}", file=sys.stderr)
+            return False
+
+    print(f"  pulled {n} remote commit(s) successfully.")
+    return True
+
+
 def _commit():
+    if not _pull_if_behind():
+        return
+
     _git("add", ".")
     staged = _git("diff", "--cached", "--name-only").stdout.strip().splitlines()
     if not staged:
