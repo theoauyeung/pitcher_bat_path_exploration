@@ -36,8 +36,6 @@ Separate XGBoost hyperparameter search over 15 swing-shape prediction models. On
 ---
 
 ## Data source
-
-`mlb_db` MySQL at `10.200.200.107`. Key column names to know:
 - Pitcher handedness: `pitcher_throws` (`"R"` / `"L"`) — **not** `pitcher_hand` or `p_throws`
 - Ball in play: `is_bip` — distinct from `is_contact` (which includes fouls)
 - Timing offset: `offset_y_ms` — frequently missing on whiffs; the model handles this with imputation + a missing indicator
