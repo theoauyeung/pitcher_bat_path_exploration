@@ -31,12 +31,17 @@
 | Symbol | Column | Units | Description |
 |--------|--------|-------|-------------|
 | $\mu_i^\text{whiff}$ | `ball_bat_miss` | in | Bat-to-ball separation at contact (Hawk-Eye measured); whiff rows only |
-| $\mu_i^\text{contact}$ | derived | in | Geometric off-center distance: $\sqrt{\text{offset\_z\_in}_i^2 + \text{offset\_x\_in}_i^2}$ |
+| $o_{z,i}$ | `offset_z_in` | in | Vertical bat-offset from sweet spot at contact |
+| $o_{x,i}$ | `offset_x_in` | in | Horizontal bat-offset from sweet spot at contact |
+| $\mu_i^\text{contact}$ | derived | in | Geometric off-center distance: $\sqrt{o_{z,i}^2 + o_{x,i}^2}$ |
 | $d_{x,i}$ | `pc{ms}_dev_x` | ft | Post-commit horizontal movement |
 | $d_{z,i}$ | `pc{ms}_dev_z` | ft | Post-commit vertical movement |
 | $\tilde{x}_i$, $\tilde{z}_i$ | `pc{ms}_x_proj`, `pc{ms}_z_proj` | ft | Pre-commit projected plate location |
 | $\Delta_i^{(m)}$ | `{metric}_dev` | ° | Angular swing deviations from Phase A |
 | $b_i$, $s_i$ | `balls`, `strikes` | count | Count state |
+| $\Delta r_i$ | `delta_run_exp` | runs | Change in run expectancy for this swing outcome |
+| $R_i^\text{take}$ | internal | runs | Expected run value of taking the pitch at projected location |
+| $\tau_{\text{miss},i}$ | `miss_distortion_tax` | runs | Run-value cost of movement-caused miss |
 
 ### Whiff miss model
 
@@ -54,10 +59,10 @@ $$
 
 ### Contact miss model
 
-Predicts geometric off-center contact distance on contact rows where $|\text{offset\_x\_in}| \leq 20$. Same right-hand side as the whiff model. OLS with HC1 robust standard errors.
+Predicts geometric off-center contact distance on contact rows where $|o_{x,i}| \leq 20$. Same right-hand side as the whiff model. OLS with HC1 robust standard errors.
 
 $$
-\mu_i^\text{contact} = \sqrt{\text{offset\_z\_in}_i^2 + \text{offset\_x\_in}_i^2}
+\mu_i^\text{contact} = \sqrt{o_{z,i}^2 + o_{x,i}^2}
 $$
 
 $$
@@ -75,7 +80,7 @@ $$
 A second OLS step on contact rows converts contact miss distance into run-value units:
 
 $$
-\text{delta\_run\_exp}_i = \gamma_0 + \gamma_1\, \mu_i^\text{contact} + \sum_c \gamma_c\, \mathbf{1}[\text{count}_i = c] + \varepsilon_i
+\Delta r_i = \gamma_0 + \gamma_1\, \mu_i^\text{contact} + \sum_c \gamma_c\, \mathbf{1}[\text{count}_i = c] + \varepsilon_i
 $$
 
 $$
@@ -105,7 +110,7 @@ f_i = \text{clip}\!\left(\frac{\mu_i^\text{mvt}}{\mu_i^\text{whiff}},\; 0,\; 1\r
 $$
 
 $$
-\text{miss\_distortion\_tax}_i = f_i \cdot r^\text{whiff}_{b_i, s_i}
+\tau_{\text{miss},i} = f_i \cdot r^\text{whiff}_{b_i, s_i}
 $$
 
 | Symbol | Description |
@@ -118,7 +123,7 @@ NaN when `ball_bat_miss` is missing (~9% of whiff rows).
 ### Contact rows
 
 $$
-\text{miss\_distortion\_tax}_i = \mu_i^\text{mvt} \cdot \kappa
+\tau_{\text{miss},i} = \mu_i^\text{mvt} \cdot \kappa
 $$
 
 $\kappa \approx -0.014$ runs/inch, so positive $\mu_i^\text{mvt}$ (movement increased miss) → negative tax (pitcher advantage).
@@ -166,27 +171,33 @@ where $\text{ERV}(b, s)$ is the expected run value of count $(b, s)$ from `count
 
 ### Take value
 
+**`take_xRV`** — $R_i^\text{take}$:
+
 $$
-\text{take\_xRV}_i = P_{\text{str},i} \cdot r^\text{cs}_{b_i, s_i} + (1 - P_{\text{str},i}) \cdot r^\text{ball}_{b_i, s_i}
+R_i^\text{take} = P_{\text{str},i} \cdot r^\text{cs}_{b_i, s_i} + (1 - P_{\text{str},i}) \cdot r^\text{ball}_{b_i, s_i}
 $$
 
 ### Decision cost
 
+**`decision_cost`** — $c_i$:
+
 $$
-c_i = \text{take\_xRV}_i - \widehat{\text{xRV}}_i^\text{intended}
+c_i = R_i^\text{take} - \widehat{\text{xRV}}_i^\text{intended}
 $$
 
 | Symbol | Description |
 |--------|-------------|
-| $\text{take\_xRV}_i$ | Expected run value of taking the pitch at its projected location |
+| $R_i^\text{take}$ | Expected run value of taking the pitch at its projected location |
 | $\widehat{\text{xRV}}_i^\text{intended}$ | Expected run value of swinging with intended mechanics at projected location (internal `_xrv_intended` from `disruption_tax_split`) |
-| $c_i$ | `decision_cost`; positive = taking was better; negative = swinging was correct |
+| $c_i$ | Positive = taking was better; negative = swinging was correct |
 
 Population mean $\approx -0.08$ runs — batters self-select into swinging at pitches where swinging is correct.
 
 ---
 
 ## 4. Adjusted disruption tax
+
+**`adjusted_disruption_tax`** — $\tau_{\text{adj},i}$:
 
 $$
 \tau_{\text{adj},i} = \tau_{\text{total},i} - \max(0,\; c_i)
@@ -195,7 +206,7 @@ $$
 | Case | Result |
 |------|--------|
 | $c_i \leq 0$ (swinging was correct) | $\tau_{\text{adj},i} = \tau_{\text{total},i}$ |
-| $c_i > 0$ (should have taken) | $\tau_{\text{adj},i} = \tau_{\text{total},i} - c_i$ — baseline shifts to $\text{take\_xRV}_i$ |
+| $c_i > 0$ (should have taken) | $\tau_{\text{adj},i} = \tau_{\text{total},i} - c_i$ — baseline shifts to $R_i^\text{take}$ |
 
 Population mean $\approx -0.012$ runs vs. $-0.002$ for raw $\tau_\text{total}$; 16.2% of swings have $c_i > 0$.
 
@@ -205,7 +216,7 @@ $\tau_{\text{adj},i} \leq \tau_{\text{total},i}$ always. When swinging was optim
 
 ## Caveats
 
-- $\text{miss\_distortion\_tax}$ for whiffs requires `ball_bat_miss`; NaN on ~9% of whiff rows where Hawk-Eye data is missing
+- `miss_distortion_tax` for whiffs requires `ball_bat_miss`; NaN on ~9% of whiff rows where Hawk-Eye data is missing
 - $\kappa$ is estimated from a second OLS step, adding noise relative to a direct counterfactual
 - Positive $c_i$ doesn't attribute the bad decision to movement — could be pitch-type deception, count-based gambling, etc. Movement attribution would require a fuller causal graph (out of scope)
 - Parametric strike zone is less accurate at edges than an empirical model from non-swing data

@@ -141,54 +141,58 @@ The same composite formula above is evaluated three times. What differs is the i
 
 ### Step 3b — Primary decomposition
 
-$$
-\tau_{\text{total},i}   = \widehat{\text{xRV}}_i^\text{realized} - \widehat{\text{xRV}}_i^\text{intended}
-\qquad \text{(`disruption\_tax`)}
-$$
+**`disruption_tax`:**
 
 $$
-\tau_{\text{spatial},i} = \widehat{\text{xRV}}_i^\text{spatial}  - \widehat{\text{xRV}}_i^\text{intended}
-\qquad \text{(`spatial\_distortion\_tax`)}
+\tau_{\text{total},i} = \widehat{\text{xRV}}_i^\text{realized} - \widehat{\text{xRV}}_i^\text{intended}
 $$
+
+**`spatial_distortion_tax`:**
+
+$$
+\tau_{\text{spatial},i} = \widehat{\text{xRV}}_i^\text{spatial} - \widehat{\text{xRV}}_i^\text{intended}
+$$
+
+Internal intermediate (not written to parquet):
 
 $$
 \tau_{\text{angular},i} = \widehat{\text{xRV}}_i^\text{realized} - \widehat{\text{xRV}}_i^\text{spatial}
-\qquad \text{(internal intermediate)}
 $$
 
 ### Step 3c — Angular distortion attribution
 
-For each axis $m$, the mediator model gives the movement-caused portion of deviation:
+For each axis $m$, the mediator model gives the movement-caused portion of deviation (`distortion_dev_{m}`):
 
 $$
 \hat{\Delta}_i^{(m)} = a_{x,m}\, d_{x,i} + a_{z,m}\, d_{z,i}
-\qquad \text{(`distortion\_dev\_\{m\}`)}
 $$
 
-The fraction of total angular deviation explained by movement, using a squared-norm decomposition across all three axes:
+The fraction of total angular deviation explained by movement, using a squared-norm decomposition across all three axes (`angular_distortion_share`):
 
 $$
 \rho_i = \text{clip}\!\left(\frac{\displaystyle\sum_{m} \bigl(\hat{\Delta}_i^{(m)}\bigr)^2}{\displaystyle\sum_{m} \bigl(\Delta_i^{(m)}\bigr)^2},\; 0,\; 1\right)
-\qquad \text{(`angular\_distortion\_share`)}
 $$
 
 $\rho_i = \text{NaN}$ when $\sum_m (\Delta_i^{(m)})^2 < 10^{-8}$ (near-zero total deviation). The squared-norm ratio is used so that $\rho_i \in [0, 1]$ regardless of whether distortion and selection components point in the same or opposite directions.
 
 ### Step 3d — Final tax split
 
-$$
-\tau_{\text{dist},i}  = \tau_{\text{spatial},i} + \tau_{\text{angular},i} \cdot \rho_i
-\qquad \text{(`distortion\_tax`)}
-$$
+**`distortion_tax`:**
 
 $$
-\tau_{\text{sel},i}   = \tau_{\text{angular},i} \cdot (1 - \rho_i)
-\qquad \text{(`selection\_tax`)}
+\tau_{\text{dist},i} = \tau_{\text{spatial},i} + \tau_{\text{angular},i} \cdot \rho_i
 $$
+
+**`selection_tax`:**
+
+$$
+\tau_{\text{sel},i} = \tau_{\text{angular},i} \cdot (1 - \rho_i)
+$$
+
+**`distortion_share`:**
 
 $$
 \phi_i = \text{clip}\!\left(\frac{\tau_{\text{dist},i}}{\tau_{\text{total},i}},\; 0,\; 1\right)
-\qquad \text{(`distortion\_share`)}
 $$
 
 **Additive invariant**: $\tau_{\text{dist},i} + \tau_{\text{sel},i} = \tau_{\text{total},i}$ holds exactly for all non-NaN rows.
