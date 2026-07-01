@@ -1,5 +1,5 @@
 """
-Phase A: Batter intended-swing model.
+Batter intended-swing model.
 
 Estimates what each batter intended to do given count, pitch location, contact
 timing, and platoon handedness. Per-batter random effects capture baseline swing
@@ -11,11 +11,6 @@ plan — either due to late pitch movement or a poor decision.
 
 Five responses: vert_attack_angle, horz_attack_angle, swing_path_tilt (angular),
 bat_speed, swing_length (effort). Each gets a separate Bambi/PyMC Gaussian LMM.
-
-Angular responses use a quadratic height term and contact-timing conditioning to
-avoid misattributing appropriate plane adaptation as execution error. Pitcher REs
-are excluded from predictions so the baseline reflects the batter's intention
-against a neutral opponent, not the specific pitcher they faced.
 
 Default inference: method="vi" (ADVI, ~2 min). Only posterior means are used
 downstream so VI is equivalent to MCMC for this pipeline.

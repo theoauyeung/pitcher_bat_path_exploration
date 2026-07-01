@@ -1,5 +1,5 @@
 """
-Phase B: run-value mediation models.
+ run-value mediation models.
 
 Two disruption channels:
   post-commit movement → angular swing deviation → run value   (mediated path)
