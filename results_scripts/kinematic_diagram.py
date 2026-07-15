@@ -329,17 +329,16 @@ def make_broadcast_annotation(
         f'{proj_in:.1f}" ({loc_note}) → {act_in:.1f}"', RED); y -= rs_d
 
     dt = data["disruption_tax"]
-    row(y, "Swing disruption",
+    row(y, "Disruption Tax",
         f"{dt:+.3f} runs", RED if dt < 0 else AMBER); y -= rs_d
 
     dc = data["decision_cost"]
     dc_color = RED if dc > 0 else GREEN
-    dc_label = "Chase cost" if dc > 0 else "Decision"
-    dc_str   = f"{dc:+.3f} runs" if dc > 0 else f"correct ({dc:+.3f})"
-    row(y, dc_label, dc_str, dc_color); y -= rs_d
+    dc_str   = f"{dc:+.3f} runs"
+    row(y, "Decision Cost", dc_str, dc_color); y -= rs_d
 
     adj = data["adjusted_disruption_tax"]
-    row(y, "Total burden",
+    row(y, "Adj Disruption Tax",
         f"{adj:+.3f} runs", RED if adj < 0 else AMBER); y -= rs_d
     y -= 0.005
 
