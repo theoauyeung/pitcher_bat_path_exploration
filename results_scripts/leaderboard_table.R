@@ -241,11 +241,11 @@ tbl_combined <- combined |>
     locations = cells_column_labels(distortion_tax_shrunk)
   ) |>
   tab_style(
-    style     = cell_fill(color = "#e8f4fd"),
+    style     = cell_fill(color = "#fde8e8"),
     locations = cells_row_groups(groups = "Most Disruptive  (Pitcher Advantage)")
   ) |>
   tab_style(
-    style     = cell_fill(color = "#fef9e7"),
+    style     = cell_fill(color = "#e8f4fd"),
     locations = cells_row_groups(groups = "Most Batter-Favorable  (Movement Helps Batter)")
   ) |>
   apply_style()
