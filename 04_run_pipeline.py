@@ -1,8 +1,4 @@
 """
-Orchestrates Phase A (batter intention) → Phase B (causal mediation) → disruption tax.
-
-Expects data/swings_precommit.parquet — run 00_pull_data.py and 01_precommit_split.py first.
-
 Key flags:
   --skip-phase-a   reload Phase A from models/intended_df.parquet without refitting
   --method vi      use ADVI (~2 min) instead of MCMC (~hours); equivalent for point estimates

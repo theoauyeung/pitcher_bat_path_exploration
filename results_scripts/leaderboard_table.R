@@ -62,8 +62,10 @@ by_pitch <- df |>
     distortion_pct = as.integer(round((n() + 1 - rank(Distortion)) / n() * 100))
   )
 
-# Color palette: 0 = blue (worst), 100 = red (best)
+# Color palette: 0 = blue (worst), 100 = red (best) — used for Table 3 percentiles
 PCT_PAL <- col_numeric(c("#2166ac", "#f7f7f7", "#d73027"), domain = c(0, 100))
+# Raw-value palette: most negative (most disruptive) = red, least negative = blue
+RAW_PAL <- col_numeric(c("#d73027", "#f7f7f7", "#2166ac"), domain = NULL)
 
 # ── Shared table styling ───────────────────────────────────────────────────────
 
@@ -101,7 +103,7 @@ top18_xrv <- by_pitch |>
 
 tbl_xrv <- top18_xrv |>
   select(pitcher_id, pitcher_full_name, pitch_label, Pitches,
-         adjxrv_pct, xRV, AdjXRV, Chase) |>
+         xRV, AdjXRV, Chase) |>
   gt() |>
   gt_fmt_mlb_headshot(columns = pitcher_id, height = 35) |>
   cols_label(
@@ -109,14 +111,13 @@ tbl_xrv <- top18_xrv |>
     pitcher_full_name = "Pitcher",
     pitch_label       = "Pitch",
     Pitches           = "Pitches",
-    adjxrv_pct        = "Adj. xRV Pctile",
     xRV               = "Swing Disruption",
     AdjXRV            = "Total Burden",
     Chase             = "Chase Cost"
   ) |>
   data_color(
-    columns = adjxrv_pct,
-    fn      = PCT_PAL
+    columns = AdjXRV,
+    fn      = RAW_PAL
   ) |>
   tab_header(
     title    = md("**Pitcher Total Burden Leaderboard**"),
@@ -143,7 +144,7 @@ top18_dist <- by_pitch |>
 
 tbl_dist <- top18_dist |>
   select(pitcher_id, pitcher_full_name, pitch_label, Pitches,
-         distortion_pct, Distortion, MissTax, AdjXRV) |>
+         Distortion, MissTax, AdjXRV) |>
   gt() |>
   gt_fmt_mlb_headshot(columns = pitcher_id, height = 35) |>
   cols_label(
@@ -151,22 +152,17 @@ tbl_dist <- top18_dist |>
     pitcher_full_name = "Pitcher",
     pitch_label       = "Pitch",
     Pitches           = "Pitches",
-    distortion_pct    = "Distortion Pctile",
     Distortion        = "Distortion Tax",
     MissTax           = "Physical Miss Tax",
     AdjXRV            = "Total Burden"
   ) |>
   data_color(
-    columns = distortion_pct,
-    fn      = PCT_PAL
+    columns = Distortion,
+    fn      = RAW_PAL
   ) |>
   tab_header(
     title    = md("**Pitcher Distortion Tax Leaderboard**"),
     subtitle = md("Movement-caused swing deviation cost  ·  ≥100 pitches  ·  2023–2025")
-  ) |>
-  tab_footnote(
-    footnote  = "Distortion Tax Pctile: percentile rank (100 = best) for movement-caused swing deviation cost.",
-    locations = cells_column_labels(distortion_pct)
   ) |>
   tab_footnote(
     footnote  = "Physical Miss Tax: run-value cost from movement-caused increase in bat-to-ball distance. Negative = pitcher advantage. Independent of angular-deviation channel.",
