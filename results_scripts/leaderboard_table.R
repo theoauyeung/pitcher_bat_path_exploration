@@ -64,8 +64,12 @@ by_pitch <- df |>
 
 # Color palette: 0 = blue (worst), 100 = red (best) — used for Table 3 percentiles
 PCT_PAL <- col_numeric(c("#2166ac", "#f7f7f7", "#d73027"), domain = c(0, 100))
-# Raw-value palette: most negative (most disruptive) = red, least negative = blue
-RAW_PAL <- col_numeric(c("#d73027", "#f7f7f7", "#2166ac"), domain = NULL)
+# Raw-value palettes anchored to full-dataset range so leaderboard rows are
+# colored relative to all pitchers, not just the 18 displayed.
+ADJXRV_PAL <- col_numeric(c("#d73027", "#f7f7f7", "#2166ac"),
+                           domain = range(by_pitch$AdjXRV,  na.rm = TRUE))
+DIST_PAL   <- col_numeric(c("#d73027", "#f7f7f7", "#2166ac"),
+                           domain = range(by_pitch$Distortion, na.rm = TRUE))
 
 # ── Shared table styling ───────────────────────────────────────────────────────
 
@@ -117,7 +121,7 @@ tbl_xrv <- top18_xrv |>
   ) |>
   data_color(
     columns = AdjXRV,
-    fn      = RAW_PAL
+    fn      = ADJXRV_PAL
   ) |>
   tab_header(
     title    = md("**Pitcher Total Burden Leaderboard**"),
@@ -158,7 +162,7 @@ tbl_dist <- top18_dist |>
   ) |>
   data_color(
     columns = Distortion,
-    fn      = RAW_PAL
+    fn      = DIST_PAL
   ) |>
   tab_header(
     title    = md("**Pitcher Distortion Tax Leaderboard**"),
