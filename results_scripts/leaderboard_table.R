@@ -175,3 +175,79 @@ tbl_dist <- top18_dist |>
   apply_style()
 
 save_png(tbl_dist, "results/figures/leaderboard_distortion.png")
+
+# ── Table 3: combined bottom / top distortion tax (pitcher-season, 2024, EB-shrunk) ─────
+# Reads EB-shrunk values from results/leaderboard.csv (written by skill_analysis.py).
+# Shows 10 most disruptive (most negative) + 10 most batter-favorable (most positive)
+# in one table with row groups, headshots, and the same palette as Tables 1-2.
+
+lb_raw <- read.csv("results/leaderboard.csv") |>
+  filter(game_year == 2024)
+
+n_tot <- nrow(lb_raw)
+
+lb24 <- lb_raw |>
+  mutate(
+    dist_pct = as.integer(round((n_tot + 1 - rank(distortion_tax_shrunk)) / n_tot * 100))
+  )
+
+bot10 <- lb24 |>
+  arrange(distortion_tax_shrunk) |>
+  slice_head(n = 10) |>
+  mutate(group = "Most Disruptive  (Pitcher Advantage)")
+
+top10 <- lb24 |>
+  arrange(desc(distortion_tax_shrunk)) |>
+  slice_head(n = 10) |>
+  mutate(group = "Most Batter-Favorable  (Movement Helps Batter)")
+
+combined <- bind_rows(bot10, top10) |>
+  mutate(
+    distortion_tax_mean   = round(distortion_tax_mean,   4),
+    distortion_tax_shrunk = round(distortion_tax_shrunk, 4)
+  )
+
+tbl_combined <- combined |>
+  select(pitcher_id, pitcher_full_name, group, n,
+         dist_pct, distortion_tax_mean, distortion_tax_shrunk) |>
+  gt(groupname_col = "group") |>
+  gt_fmt_mlb_headshot(columns = pitcher_id, height = 35) |>
+  cols_label(
+    pitcher_id            = "",
+    pitcher_full_name     = "Pitcher",
+    n                     = "Swings",
+    dist_pct              = "Distortion Pctile",
+    distortion_tax_mean   = "Raw Mean",
+    distortion_tax_shrunk = "EB-Shrunk"
+  ) |>
+  data_color(
+    columns = dist_pct,
+    fn      = PCT_PAL
+  ) |>
+  fmt_number(
+    columns = c(distortion_tax_mean, distortion_tax_shrunk),
+    decimals = 4
+  ) |>
+  tab_header(
+    title    = md("**Pitcher Distortion Tax Leaderboard — 2024 Season**"),
+    subtitle = md("Most disruptive (negative) and most batter-favorable (positive)  ·  EB shrinkage  ·  min 200 swings")
+  ) |>
+  tab_footnote(
+    footnote  = "Distortion Tax: run-value cost of post-commit movement. Negative = pitcher advantage (movement displaced ball to worse position for batter).",
+    locations = cells_column_labels(distortion_tax_shrunk)
+  ) |>
+  tab_footnote(
+    footnote  = "EB-Shrunk: empirical-Bayes estimate shrunk toward grand mean by reliability weight n / (n + within-var / between-var).",
+    locations = cells_column_labels(distortion_tax_shrunk)
+  ) |>
+  tab_style(
+    style     = cell_fill(color = "#e8f4fd"),
+    locations = cells_row_groups(groups = "Most Disruptive  (Pitcher Advantage)")
+  ) |>
+  tab_style(
+    style     = cell_fill(color = "#fef9e7"),
+    locations = cells_row_groups(groups = "Most Batter-Favorable  (Movement Helps Batter)")
+  ) |>
+  apply_style()
+
+save_png(tbl_combined, "results/figures/distortion_tax_leaderboard_2024.png")
