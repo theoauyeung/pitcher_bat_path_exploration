@@ -20,18 +20,12 @@ Use `--skip-phase-a` to reload the cached Phase A output (`models/intended_df.pa
 
 ## Architecture
 
-**Workstream 1 — Causal mediation pipeline** (`00–04`):
-
-Estimates how much of each swing's run-value cost is caused by post-commit pitch movement (distortion) vs. the batter's own swing decision (selection). The causal chain:
+Causal mediation pipeline estimating how much of each swing's run-value cost is caused by post-commit pitch movement (distortion) vs. the batter's own swing decision (selection). The causal chain:
 
 ```
 post-commit movement → swing-shape deviation → run value
     (treatment)            (mediator)           (outcome)
 ```
-
-**Workstream 2 — Swing shape autoresearch** (`experiments/swing_shape/`):
-
-Separate XGBoost hyperparameter search over 15 swing-shape prediction models. Only `config.py` changes between experiments; `train.py` is read-only.
 
 ---
 
@@ -45,6 +39,10 @@ Key column names to know:
 ---
 
 ## What each script does
+
+### `db.py` — Database connection
+
+DuckDB connection helper used by `pull_data.py` and `results_scripts/generate_results.py`. Reads connection parameters from environment; do not hardcode credentials.
 
 ### `pull_data.py` — Data pull
 
@@ -60,7 +58,7 @@ Default commit time is 150 ms. This is deliberately conservative (understates di
 
 Output: `data/swings_precommit.parquet` with `pc{ms}_dev_x/z`, `pc{ms}_x_proj/z_proj`, and 9-parameter trajectory columns for each commit time in the grid.
 
-### `intention_model.py` — Phase A: batter intended swing (imported by 04)
+### `intention_model.py` — Phase A: batter intended swing (imported by `run_pipeline.py`)
 
 Fits a Bayesian LMM per swing-shape response (VAA, HAA, swing path tilt, bat speed, swing length) using count, pitch location, contact timing, and platoon handedness as predictors, with per-batter random effects. The model captures what each batter *intended* to do given the information available at swing time.
 
@@ -68,7 +66,7 @@ The residual `realized − intended` is the swing deviation mediator that Phase 
 
 Key behavior: `method="vi"` (ADVI) is the default — only posterior means are used downstream so it's equivalent to MCMC and takes ~2 min instead of hours. Phase A output is cached to `models/intended_df.parquet`; Bambi model objects cannot be pickled on Python 3.14.
 
-### `causal_models.py` — Phase B: run-value mediation (imported by 04)
+### `causal_models.py` — Phase B: run-value mediation (imported by `run_pipeline.py`)
 
 Two sets of models:
 
@@ -105,6 +103,14 @@ adjusted_disruption_tax = disruption_tax − max(0, decision_cost)
 ### `run_pipeline.py` — Orchestrator
 
 Runs Phase A → Phase B in sequence and writes all outputs. Key flag: `--skip-phase-a` loads cached Phase A output. Use `method="vi"` for fast iteration.
+
+### `run_values.py` — RE24 and linear weights
+
+Computes run expectancy tables and linear weights from the full pitch dataset. Must run before `run_pipeline.py`.
+
+### `watch_commit.py` — Live trajectory monitor
+
+Development utility for inspecting the pre/post-commit trajectory split on individual pitches. Not part of the production pipeline.
 
 ---
 

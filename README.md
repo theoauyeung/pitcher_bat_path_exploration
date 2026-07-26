@@ -8,7 +8,7 @@ Causal mediation analysis estimating how post-commit pitch movement disrupts bat
 
 When a pitcher throws a breaking ball, some of the swing deviation it induces is physically unavoidable — the ball moved after the batter's swing was already committed. Some is attributable to the batter's own decision. This project separates the two.
 
-We exploit the neuromuscular timing asymmetry: a batter cannot react to ball movement that occurs within ~150 ms of contact. Any deviation between the ball's projected and actual plate-crossing location after that window is exogenous to the swing decision. We use this to decompose per-swing run-value loss into:
+A batter cannot react to ball movement that occurs within ~150 ms of contact. Any deviation between the ball's projected and actual plate-crossing location after that window is exogenous to the swing decision. We use this to decompose per-swing run-value loss into:
 
 - **Distortion** — run-value cost caused by post-commit pitch movement (spatial displacement + induced swing-plane deviation)
 - **Selection** — run-value cost attributable to the batter's own swing decision
@@ -18,13 +18,13 @@ We exploit the neuromuscular timing asymmetry: a batter cannot react to ball mov
 ## Pipeline
 
 ```bash
-python pull_data.py          # pull MLB pitch-by-pitch from mlb_db → data/
-python precommit_split.py    # compute pre/post-commit trajectory split
-python run_values.py            # build RE24, linear weights
-python run_pipeline.py       # Phase A + Phase B → results/xrv_causal.parquet
+.venv/bin/python pull_data.py          # pull MLB pitch-by-pitch from mlb_db → data/
+.venv/bin/python precommit_split.py    # compute pre/post-commit trajectory split
+.venv/bin/python run_values.py         # build RE24, linear weights
+.venv/bin/python run_pipeline.py       # Phase A + Phase B → results/xrv_causal.parquet
 ```
 
-`run_pipeline.py` also accepts `--skip-phase-a` to reload cached Phase A output and `--method vi` for fast ADVI inference (~2 min vs. hours for MCMC).
+`run_pipeline.py` accepts `--skip-phase-a` to reload cached Phase A output without refitting, and `--method vi` for fast ADVI inference (~2 min vs. hours for MCMC).
 
 Visualization scripts (run after pipeline):
 
@@ -68,7 +68,7 @@ The residual — realized minus predicted — is the swing deviation used as the
 
 ### Step 3 — Run-value mediation
 
-**Mediator models** estimate how much of each angular swing deviation is mechanically caused by post-commit movement. The treatment coefficients give the causal leverage — how many degrees of swing deviation does one foot of late movement produce.
+**Mediator models** estimate how much of each angular swing deviation is mechanically caused by post-commit movement. The treatment coefficients give the causal leverage: degrees of swing deviation per foot of late movement.
 
 **Outcome models** price swing deviation in run value via three channels: P(ball in play), P(foul | not in play), and E[xwOBA | ball in play]. Foul and whiff are modeled separately because at two strikes a foul keeps the at-bat alive while a whiff ends it.
 
@@ -80,9 +80,9 @@ The residual — realized minus predicted — is the swing deviation used as the
 | Spatial only | zero deviations | actual (post-movement) |
 | Intended | zero deviations | projected (pre-movement) |
 
-This lets us decompose the total disruption tax into spatial distortion (the ball ended up somewhere different than the batter expected) and angular disruption (the batter's swing plane was knocked off-target). The angular component is further split by how much was mechanically caused by movement vs. the batter's own decision.
+Total disruption decomposes into spatial distortion (the ball arrived somewhere different than the batter expected) and angular disruption (the batter's swing plane was knocked off-target). The angular component splits further based on how much was mechanically forced by movement vs. the batter's own decision.
 
-The pipeline also computes **physical miss** (bat-to-ball contact quality degradation from late movement), **decision cost** (opportunity cost of swinging vs. taking at the projected location), and **adjusted disruption tax** (total batter burden vs. the optimal action — `disruption_tax − max(0, decision_cost)`).
+The pipeline also computes **physical miss** (bat-to-ball separation on contact and whiffs), **decision cost** (opportunity cost of swinging vs. taking at the projected location), and **adjusted disruption tax**: `disruption_tax − max(0, decision_cost)`. The adjusted metric captures total batter cost vs. the optimal available action.
 
 ---
 
@@ -105,8 +105,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh     # Mac/Linux
 
 # Create venv and install
 uv venv --python 3.14
-source .venv/bin/activate                           # Mac/Linux
-# Windows: .venv\Scripts\activate
+source .venv/bin/activate
 uv pip install -r requirements.txt
 ```
 
@@ -114,9 +113,9 @@ uv pip install -r requirements.txt
 
 ## Resuming on a new Mac
 
-> **No Driveline account or DB access needed** — everything required for day-to-day analysis work (regenerating all figures, running the R leaderboard tables, editing the results paper) is fully self-contained once you have the data bundle. The only things that require Driveline network/VPN are `pull_data.py` (fresh data pull) and `kinematic_diagram.py` (broadcast cards). Neither is needed to resume current work.
+> **No Driveline account or DB access needed** — everything required for day-to-day analysis (regenerating all figures, running the R leaderboard tables, editing the results paper) is self-contained once you have the data bundle. Only `pull_data.py` (fresh data pull) and `kinematic_diagram.py` (broadcast cards) require Driveline network/VPN.
 
-### What requires Driveline access vs what doesn't
+### What requires Driveline access vs. what doesn't
 
 | Task | Needs Driveline? |
 |------|-----------------|
@@ -127,7 +126,7 @@ uv pip install -r requirements.txt
 | Pull fresh MLB data (`pull_data.py`) | Yes — internal DB/VPN |
 | Generate kinematic broadcast cards | Yes — internal DB |
 
-When you do run `pull_data.py` on the Mac (at Driveline or via VPN), set `DATA_EXPORT_DIR` once in `~/.claude/.env` and the output CSV will be copied to personal cloud storage automatically on every pull — no manual transfer needed:
+When you do run `pull_data.py` at Driveline or via VPN, set `DATA_EXPORT_DIR` once in `~/.claude/.env` and the output CSV copies to personal cloud automatically on every pull:
 
 ```
 # ~/.claude/.env
@@ -141,7 +140,7 @@ The directory must already exist. The script prints confirmation after copying.
 
 ### Get the data bundle (browser — no desktop app needed)
 
-The data bundle (`pitcher_bat_path_bundle.zip`, 3.29 GB) is stored in **Driveline OneDrive**. Download it from any browser — no OneDrive desktop app or email client required:
+The data bundle (`pitcher_bat_path_bundle.zip`, 3.29 GB) is in **Driveline OneDrive**. Download from any browser — no OneDrive desktop app or email client required:
 
 1. Go to **onedrive.com** (or **office.com → OneDrive**) and sign in with `theo.an-yeung@drivelinebaseball.com`
 2. In *My files* (root level), find **`pitcher_bat_path_bundle.zip`** and download it
@@ -192,7 +191,7 @@ This takes 3–5 minutes on first install. No Driveline access needed — all pa
 
 ```bash
 # Install Homebrew first if not present
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+/bin/bash -c "$(curl -fsSF https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 
 brew install r
 
@@ -212,7 +211,7 @@ Rscript results_scripts/leaderboard_table.R
 
 Both commands run fully offline from the bundle files.
 
-### Path changes from Windows → Mac
+### Path changes from Windows to Mac
 
 | Item | Windows | Mac |
 |------|---------|-----|
@@ -248,7 +247,7 @@ Each figure is a two-panel broadcast card: game screenshot with arrow callout (l
 - **Proj. → actual** — the ball's projected vs. actual plate-crossing height, with zone context.
 - **Swing disruption** — run-value cost conditional on the decision to swing (`disruption_tax`; negative = pitcher advantage).
 - **Decision / Chase cost** — opportunity cost of swinging vs. taking at the projected location. Green when swinging was correct; red when taking was better.
-- **Total burden** — `adjusted_disruption_tax = disruption_tax − max(0, decision_cost)`. The headline metric: total batter cost vs. the optimal available action.
+- **Total burden** — `adjusted_disruption_tax = disruption_tax − max(0, decision_cost)`. Total batter cost vs. the optimal available action.
 - **Distortion / Selection bar** — fraction of swing disruption caused by post-commit movement (red) vs. the batter's own decision (amber).
 
 | Pitcher / Batter | Pitch | Dominant cause |
