@@ -114,78 +114,124 @@ uv pip install -r requirements.txt
 
 ## Resuming on a new Mac
 
-### 1 — Get the data bundle
+> **No Driveline account or DB access needed** — everything required for day-to-day analysis work (regenerating all figures, running the R leaderboard tables, editing the results paper) is fully self-contained once you have the data bundle. The only things that require Driveline network/VPN are `pull_data.py` (fresh data pull) and `kinematic_diagram.py` (broadcast cards). Neither is needed to resume current work.
 
-Download `pitcher_bat_path_bundle.zip` from OneDrive (Driveline email account → OneDrive → top level).
+### What requires Driveline access vs what doesn't
 
-### 2 — Clone and unzip
+| Task | Needs Driveline? |
+|------|-----------------|
+| Regenerate all paper figures | No |
+| Regenerate R leaderboard tables | No |
+| Edit results draft | No |
+| Rerun Phase A + Phase B models | No (cached in bundle) |
+| Pull fresh MLB data (`pull_data.py`) | Yes — internal DB/VPN |
+| Generate kinematic broadcast cards | Yes — internal DB |
+
+---
+
+### Before you return the old machine — do this first
+
+The data bundle (`pitcher_bat_path_bundle.zip`, 3.29 GB) is currently on Driveline OneDrive. You need to copy it somewhere accessible from your personal Mac **before** you lose access to this machine. Pick one:
+
+- **AirDrop** — fastest if both machines are nearby. On this Windows machine: open the bundle zip in Explorer, right-click, Send to → Nearby sharing. On the Mac, accept.
+- **USB drive** — copy `C:\Users\theo.an-yeung\OneDrive - Driveline Baseball\pitcher_bat_path_bundle.zip` to the drive.
+- **Personal cloud** — iCloud Drive, personal Google Drive, Dropbox, etc. Upload the zip from this machine, download on the Mac without any Driveline credentials.
+
+Confirm the file is 3.29 GB before you disconnect.
+
+---
+
+### 1 — Clone the repo
 
 ```bash
 git clone https://github.com/theoauyeung/pitcher_bat_path_exploration.git
 cd pitcher_bat_path_exploration
-unzip /path/to/pitcher_bat_path_bundle.zip   # extracts into data/, models/, results/
 ```
 
-The zip uses repo-relative paths so it unpacks directly into the right directories.
+No credentials needed — the repo is public.
+
+### 2 — Unzip the bundle into the repo
+
+```bash
+unzip /path/to/pitcher_bat_path_bundle.zip
+# extracts data/, models/, results/ directly into the repo root
+```
+
+Confirm these exist after unzipping:
+- `data/swings_precommit.parquet` (617 MB)
+- `models/causal_models.joblib` (1.5 GB)
+- `results/xrv_causal.parquet` (52 MB)
 
 ### 3 — Set up Python
 
 ```bash
-# Install uv if not already present
+# Install uv (package + Python version manager)
 curl -LsSf https://astral.sh/uv/install.sh | sh
-source ~/.cargo/env   # or open a new terminal
+source ~/.local/bin/env    # or open a new terminal
 
+# Install Python 3.14 and create the venv
+uv python install 3.14
 uv venv --python 3.14
 source .venv/bin/activate
+
+# Install all dependencies
 uv pip install -r requirements.txt
 ```
 
-If Python 3.14 is not available yet via uv, install it first:
-```bash
-uv python install 3.14
-```
+This takes 3–5 minutes on first install. No Driveline access needed — all packages are from PyPI.
 
 ### 4 — Set up R (for leaderboard tables)
 
 ```bash
+# Install Homebrew first if not present
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
 brew install r
-# R packages (run once inside R or Rscript):
-Rscript -e 'install.packages(c("arrow","dplyr","gt","gtExtras","mlbplotR","scales","webshot2"))'
+
+# Install R packages (run once — downloads from CRAN, no Driveline needed)
+Rscript -e 'install.packages(c("arrow","dplyr","gt","gtExtras","mlbplotR","scales","webshot2"), repos="https://cloud.r-project.org")'
 ```
 
-On Mac, `Rscript` will be on PATH after the brew install — no hardcoded path needed. The R script (`results_scripts/leaderboard_table.R`) uses only `Rscript` by name and is cross-platform.
-
-### 5 — Verify
+### 5 — Verify everything works
 
 ```bash
+# Should write results/figures/reliability.png — no network or DB needed
 .venv/bin/python results_scripts/generate_results.py reliability
-# → should write results/figures/reliability.png without errors
+
+# Should write results/figures/*.png for all leaderboard tables — no network or DB needed
+Rscript results_scripts/leaderboard_table.R
 ```
 
-### Machine-specific things that change
+Both commands run fully offline from the bundle files.
 
-| Item | Old (Windows) | New (Mac) |
-|------|--------------|-----------|
-| Python venv activate | `.venv\Scripts\activate` | `source .venv/bin/activate` |
-| Python binary | `.venv\Scripts\python.exe` | `.venv/bin/python` |
-| Rscript path | `C:\Users\theo.an-yeung\AppData\Local\Programs\R\R-4.6.0\bin\Rscript.exe` | `Rscript` (on PATH via brew) |
-| DB access (`pull_data.py`) | Requires internal network / VPN | Same — needs VPN or on-site |
+### Path changes from Windows → Mac
 
-### What you don't need to rerun
+| Item | Windows | Mac |
+|------|---------|-----|
+| Activate venv | `.venv\Scripts\activate` | `source .venv/bin/activate` |
+| Run Python | `.venv\Scripts\python.exe` | `.venv/bin/python` |
+| Run Rscript | Full path to `Rscript.exe` | `Rscript` (on PATH after brew) |
+| Path separator | `\` | `/` |
 
-With the bundle in place, you can immediately run `generate_results.py` and `leaderboard_table.R` to regenerate all figures. You only need to rerun the pipeline (`00`–`04`) if you want fresh data from the DB.
+No hardcoded Windows paths exist in the Python or R scripts — all paths use forward slashes or `pathlib.Path`.
 
-### Personal checklist (do this yourself on the new Mac)
+### Personal checklist
 
-- [ ] Sign into OneDrive with your Driveline account and wait for sync to show "Up to date" on `pitcher_bat_path_bundle.zip` before downloading (3.3 GB — allow 10–20 min upload time on the source machine)
-- [ ] Download the bundle; confirm the zip is 3.29 GB before unzipping
-- [ ] `git clone` and `unzip` as above
-- [ ] `uv venv --python 3.14` — if uv can't find 3.14, run `uv python install 3.14` first
-- [ ] Run the verify command and confirm it writes `results/figures/reliability.png` without errors
-- [ ] Install R and R packages if you want to regenerate leaderboard tables
-- [ ] For DB access (`pull_data.py`): connect to VPN or be on-site at Driveline
+**On the old machine before returning it:**
+- [ ] Confirm `pitcher_bat_path_bundle.zip` on Driveline OneDrive shows "Up to date" (green checkmark, not sync arrows) — allow 10–20 min if recently written
+- [ ] Copy the bundle to personal storage (USB / iCloud / personal Google Drive) — do NOT rely on Driveline OneDrive as the only copy
+- [ ] Verify the copied file is 3.29 GB
 
-> **Access risk:** The bundle is in your Driveline work OneDrive. If you lose access to the Driveline account, the bundle is inaccessible. Consider downloading a personal backup copy to a USB or personal cloud before returning the machine.
+**On the new Mac:**
+- [ ] Copy bundle to new Mac; confirm 3.29 GB
+- [ ] `git clone` and `unzip` as above — no Driveline login needed
+- [ ] `uv python install 3.14 && uv venv --python 3.14`
+- [ ] `source .venv/bin/activate && uv pip install -r requirements.txt`
+- [ ] `.venv/bin/python results_scripts/generate_results.py reliability` — confirm it writes `results/figures/reliability.png` with no errors
+- [ ] `brew install r` then install R packages
+- [ ] `Rscript results_scripts/leaderboard_table.R` — confirm three PNGs are saved to `results/figures/`
+
+> **Security note:** `pull_data.py` and `run_values.py` contain a hardcoded fallback DB password. The repo is public. Rotate the `BIOMECH_DB_PASS` credential with your Driveline IT/data team and store it only via the `get_secret()` environment lookup — not as a hardcoded default.
 
 ---
 
