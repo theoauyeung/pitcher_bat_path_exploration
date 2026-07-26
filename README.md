@@ -127,6 +127,16 @@ uv pip install -r requirements.txt
 | Pull fresh MLB data (`pull_data.py`) | Yes — internal DB/VPN |
 | Generate kinematic broadcast cards | Yes — internal DB |
 
+When you do run `pull_data.py` on the Mac (at Driveline or via VPN), set `DATA_EXPORT_DIR` once in `~/.claude/.env` and the output CSV will be copied to personal cloud storage automatically on every pull — no manual transfer needed:
+
+```
+# ~/.claude/.env
+DATA_EXPORT_DIR=/Users/theo/Library/CloudStorage/iCloudDrive/pitcher_data
+# or Google Drive: DATA_EXPORT_DIR=/Users/theo/Library/CloudStorage/GoogleDrive-you@gmail.com/My Drive/pitcher_data
+```
+
+The directory must already exist. The script prints confirmation after copying.
+
 ---
 
 ### Before you return the old machine — do this first

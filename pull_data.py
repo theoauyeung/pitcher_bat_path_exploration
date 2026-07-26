@@ -168,6 +168,8 @@ print(f"After swing + tracking filter: {len(df):,} rows")
 
 # ── 4. Save ───────────────────────────────────────────────────────────────────
 
+import shutil
+
 Path("data").mkdir(exist_ok=True)
 out = Path("data/swings_2023_2025.csv")
 df.to_csv(out, index=False)
@@ -181,3 +183,18 @@ print(f"Whiffs: {df['is_whiff'].sum():,} ({100*df['is_whiff'].mean():.1f}%)")
 print(f"Has prior pitch context (prev_pitch_type not NaN): "
       f"{df['prev_pitch_type'].notna().sum():,} ({100*df['prev_pitch_type'].notna().mean():.1f}%)")
 print(f"Columns ({len(df.columns)}): {list(df.columns)}")
+
+# ── 5. Copy to external export dir (optional) ─────────────────────────────────
+# Set DATA_EXPORT_DIR in ~/.claude/.env to auto-copy the output to personal
+# cloud storage (iCloud, Google Drive, etc.) after each pull.
+# Example: DATA_EXPORT_DIR=/Users/theo/Library/CloudStorage/iCloudDrive/pitcher_data
+
+export_dir = get_secret("DATA_EXPORT_DIR")
+if export_dir:
+    dest = Path(export_dir)
+    if dest.exists():
+        dest_file = dest / out.name
+        shutil.copy2(out, dest_file)
+        print(f"Copied to external export: {dest_file}  ({dest_file.stat().st_size / 1e6:.1f} MB)")
+    else:
+        print(f"DATA_EXPORT_DIR not found, skipping export copy: {export_dir}")
