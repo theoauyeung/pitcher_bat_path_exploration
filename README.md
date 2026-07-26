@@ -139,15 +139,13 @@ The directory must already exist. The script prints confirmation after copying.
 
 ---
 
-### Before you return the old machine — do this first
+### Get the data bundle (browser — no desktop app needed)
 
-The data bundle (`pitcher_bat_path_bundle.zip`, 3.29 GB) is currently on Driveline OneDrive. You need to copy it somewhere accessible from your personal Mac **before** you lose access to this machine. Pick one:
+The data bundle (`pitcher_bat_path_bundle.zip`, 3.29 GB) is stored in **Driveline OneDrive**. Download it from any browser — no OneDrive desktop app or email client required:
 
-- **AirDrop** — fastest if both machines are nearby. On this Windows machine: open the bundle zip in Explorer, right-click, Send to → Nearby sharing. On the Mac, accept.
-- **USB drive** — copy `C:\Users\theo.an-yeung\OneDrive - Driveline Baseball\pitcher_bat_path_bundle.zip` to the drive.
-- **Personal cloud** — iCloud Drive, personal Google Drive, Dropbox, etc. Upload the zip from this machine, download on the Mac without any Driveline credentials.
-
-Confirm the file is 3.29 GB before you disconnect.
+1. Go to **onedrive.com** (or **office.com → OneDrive**) and sign in with `theo.an-yeung@drivelinebaseball.com`
+2. In *My files* (root level), find **`pitcher_bat_path_bundle.zip`** and download it
+3. Confirm the downloaded file is 3.29 GB before continuing
 
 ---
 
@@ -229,19 +227,16 @@ No hardcoded Windows paths exist in the Python or R scripts — all paths use fo
 
 **On the old machine before returning it:**
 - [ ] Confirm `pitcher_bat_path_bundle.zip` on Driveline OneDrive shows "Up to date" (green checkmark, not sync arrows) — allow 10–20 min if recently written
-- [ ] Copy the bundle to personal storage (USB / iCloud / personal Google Drive) — do NOT rely on Driveline OneDrive as the only copy
-- [ ] Verify the copied file is 3.29 GB
 
 **On the new Mac:**
-- [ ] Copy bundle to new Mac; confirm 3.29 GB
-- [ ] `git clone` and `unzip` as above — no Driveline login needed
-- [ ] `uv python install 3.14 && uv venv --python 3.14`
-- [ ] `source .venv/bin/activate && uv pip install -r requirements.txt`
+- [ ] Go to **onedrive.com** in a browser, sign in with `theo.an-yeung@drivelinebaseball.com`, download `pitcher_bat_path_bundle.zip` — no desktop app needed
+- [ ] Confirm downloaded file is 3.29 GB
+- [ ] `git clone https://github.com/theoauyeung/pitcher_bat_path_exploration.git && cd pitcher_bat_path_exploration`
+- [ ] `unzip ~/Downloads/pitcher_bat_path_bundle.zip -d .` — confirms `data/`, `models/`, `results/` land in repo root
+- [ ] `uv python install 3.14 && uv venv --python 3.14 && source .venv/bin/activate && uv pip install -r requirements.txt`
 - [ ] `.venv/bin/python results_scripts/generate_results.py reliability` — confirm it writes `results/figures/reliability.png` with no errors
-- [ ] `brew install r` then install R packages
-- [ ] `Rscript results_scripts/leaderboard_table.R` — confirm three PNGs are saved to `results/figures/`
-
-> **Security note:** `pull_data.py` and `run_values.py` contain a hardcoded fallback DB password. The repo is public. Rotate the `BIOMECH_DB_PASS` credential with your Driveline IT/data team and store it only via the `get_secret()` environment lookup — not as a hardcoded default.
+- [ ] `brew install r` then `Rscript -e 'install.packages(c("arrow","dplyr","gt","gtExtras","mlbplotR","scales","webshot2"), repos="https://cloud.r-project.org")'`
+- [ ] `Rscript results_scripts/leaderboard_table.R` — confirm three PNGs saved to `results/figures/`
 
 ---
 

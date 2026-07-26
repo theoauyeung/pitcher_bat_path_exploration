@@ -27,7 +27,6 @@ __pycache__/
 # Experiments
 experiments/
 
-# Scripts not part of main numbered pipeline
+# One-shot scripts
 _make_notebooks.py
-run_values.py
 show_env.py

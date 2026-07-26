@@ -33,12 +33,20 @@ def get_secret(name):
 
 # ── 1. Connect ─────────────────────────────────────────────────────────────────
 
+host = get_secret("BIOMECH_DB_HOST")
+user = get_secret("BIOMECH_DB_USER")
+password = get_secret("BIOMECH_DB_PASS")
+if not all([host, user, password]):
+    missing = [k for k, v in {"BIOMECH_DB_HOST": host, "BIOMECH_DB_USER": user,
+                               "BIOMECH_DB_PASS": password}.items() if not v]
+    raise RuntimeError(f"Missing DB credentials in ~/.claude/.env: {', '.join(missing)}")
+
 print("Connecting to mlb_db…")
 conn = mysql.connector.connect(
-    host=get_secret("BIOMECH_DB_HOST") or "10.200.200.107",
+    host=host,
     port=int(get_secret("BIOMECH_DB_PORT") or 3306),
-    user=get_secret("BIOMECH_DB_USER") or "analystreadonly",
-    password=get_secret("BIOMECH_DB_PASS") or "IZTcommandRead99",
+    user=user,
+    password=password,
     database="mlb_db",
     connection_timeout=120,
 )
@@ -184,17 +192,25 @@ print(f"Has prior pitch context (prev_pitch_type not NaN): "
       f"{df['prev_pitch_type'].notna().sum():,} ({100*df['prev_pitch_type'].notna().mean():.1f}%)")
 print(f"Columns ({len(df.columns)}): {list(df.columns)}")
 
-# ── 5. Copy to external export dir (optional) ─────────────────────────────────
-# Set DATA_EXPORT_DIR in ~/.claude/.env to auto-copy the output to personal
-# cloud storage (iCloud, Google Drive, etc.) after each pull.
-# Example: DATA_EXPORT_DIR=/Users/theo/Library/CloudStorage/iCloudDrive/pitcher_data
+# ── 5. Copy to Driveline OneDrive (auto-detected, so the file is always in OneDrive) ──
+# Looks for the OneDrive folder in standard locations on Windows and Mac.
+# Override with DATA_EXPORT_DIR in ~/.claude/.env if needed.
 
-export_dir = get_secret("DATA_EXPORT_DIR")
-if export_dir:
-    dest = Path(export_dir)
-    if dest.exists():
+ONEDRIVE_CANDIDATES = [
+    Path.home() / "OneDrive - Driveline Baseball",                         # Windows / Mac (app)
+    Path.home() / "Library/CloudStorage/OneDrive-DrivelineBaseball",       # Mac (app, new layout)
+    Path(get_secret("DATA_EXPORT_DIR")) if get_secret("DATA_EXPORT_DIR") else None,
+]
+
+exported = False
+for dest in ONEDRIVE_CANDIDATES:
+    if dest is not None and dest.exists():
         dest_file = dest / out.name
         shutil.copy2(out, dest_file)
-        print(f"Copied to external export: {dest_file}  ({dest_file.stat().st_size / 1e6:.1f} MB)")
-    else:
-        print(f"DATA_EXPORT_DIR not found, skipping export copy: {export_dir}")
+        print(f"Copied to OneDrive: {dest_file}  ({dest_file.stat().st_size / 1e6:.1f} MB)")
+        exported = True
+        break
+
+if not exported:
+    print("OneDrive folder not found — file saved locally only. "
+          "Set DATA_EXPORT_DIR in ~/.claude/.env to specify an export path.")
