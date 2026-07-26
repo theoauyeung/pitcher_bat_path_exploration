@@ -4,12 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Running the pipeline
 
-```powershell
+```bash
 # Always use the project venv, not system Python
-.venv\Scripts\python.exe pull_data.py          # data/swings_2023_2025.csv
-.venv\Scripts\python.exe precommit_split.py    # data/swings_precommit.parquet
-.venv\Scripts\python.exe run_values.py            # results/linear_weights.csv, count_values.csv
-.venv\Scripts\python.exe run_pipeline.py       # results/xrv_causal.parquet + leaderboards
+.venv/bin/python pull_data.py          # data/swings_2023_2025.csv
+.venv/bin/python precommit_split.py    # data/swings_precommit.parquet
+.venv/bin/python run_values.py         # results/linear_weights.csv, count_values.csv
+.venv/bin/python run_pipeline.py       # results/xrv_causal.parquet + leaderboards
 ```
 
 Scripts must run in order. `run_pipeline.py` is the entry point for Phase A + Phase B; it imports `intention_model` and `causal_models` directly.
