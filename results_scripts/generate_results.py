@@ -567,7 +567,7 @@ def fig_reliability():
                      "yoy_24_25_r": r2425, "yoy_24_25_icc": icc2425})
 
     tbl = pd.DataFrame(rows).set_index("metric")
-    tbl.to_csv("results/figures/08_reliability.csv")
+    tbl.to_csv("results/figures/reliability.csv")
 
     def _fmt(r): return "—" if np.isnan(r) else f"{r:.3f}"
     def _col(r):
@@ -599,7 +599,7 @@ def fig_reliability():
         t[(0, j)].set_facecolor("#2c3e50"); t[(0, j)].get_text().set_color("white")
         t[(0, j)].get_text().set_fontweight("bold")
     fig.tight_layout()
-    out = "results/figures/08_reliability.png"
+    out = "results/figures/reliability.png"
     fig.savefig(out, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"Saved {out}")

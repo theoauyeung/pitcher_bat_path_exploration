@@ -91,7 +91,7 @@ $$
 \mathbf{f}_i = \bigl[\Delta_i^{(\text{VAA})},\; \Delta_i^{(\text{HAA})},\; \Delta_i^{(\text{tilt})},\; x_i,\; z_i,\; b_i,\; s_i\bigr]
 $$
 
-Column order is fixed by `OUTCOME_FEATURES` in `03_causal_models.py` and must match between fit and predict.
+Column order is fixed by `OUTCOME_FEATURES` in `causal_models.py` and must match between fit and predict.
 
 ### Three XGBoost models
 
@@ -211,7 +211,7 @@ $$
 
 ## Implementation
 
-**`03_causal_models.py`**:
+**`causal_models.py`**:
 - `fit_mediator_models(df, commit_ms)` → dict of MixedLMResults per angular deviation axis
 - `fit_outcome_models(df, commit_ms)` → `(bip_model, foul_model, xwoba_model, whiff_rv)`
 - `_xrv_from_shape(df, ..., zero_angular, zero_spatial)` — evaluates one counterfactual scenario
@@ -219,7 +219,7 @@ $$
 - `indirect_effect(...)` → numerical finite-difference cross-check (central difference, $\varepsilon = 0.5°$)
 - `negative_control_check`, `positive_control_check` — built-in validation
 
-**`04_run_pipeline.py`** — Phase B runs after Phase A. Mediator and outcome models fit sequentially; disruption tax computed immediately after. `_xrv_intended` is passed to `compute_decision_cost` then dropped before save.
+**`run_pipeline.py`** — Phase B runs after Phase A. Mediator and outcome models fit sequentially; disruption tax computed immediately after. `_xrv_intended` is passed to `compute_decision_cost` then dropped before save.
 
 ---
 

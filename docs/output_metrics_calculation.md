@@ -7,11 +7,11 @@ This document traces every column in `results/xrv_causal.parquet` from raw model
 ## Pipeline overview
 
 ```
-Phase A (02_intention_model.py)
+Phase A (intention_model.py)
   → intended_{metric}         (Bayesian LMM posterior mean prediction)
   → {metric}_dev              (realized − intended)
 
-Phase B (03_causal_models.py)
+Phase B (causal_models.py)
   → Mediator models           (one LME per angular axis)
   → Outcome models            (3× XGBoost: BIP, foul, xwOBA)
   → xrv_realized, xrv_spatial, xrv_intended  (three counterfactual evaluations)

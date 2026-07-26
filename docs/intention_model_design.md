@@ -138,19 +138,19 @@ For each swing:
 - `intended_{metric}` — the posterior-mean predicted swing shape $\hat{y}_i$
 - `{metric}_dev` — the deviation $\Delta_i^{(m)}$, the Phase B mediator
 
-Both are written to `models/intended_df.parquet` and joined back to the full swing frame in `04_run_pipeline.py`. Bambi model objects cannot be pickled on Python 3.14 (FrameLocalsProxy in formulae.Environment); only `idata` and `data` are persisted to `models/intention_result.joblib`.
+Both are written to `models/intended_df.parquet` and joined back to the full swing frame in `run_pipeline.py`. Bambi model objects cannot be pickled on Python 3.14 (FrameLocalsProxy in formulae.Environment); only `idata` and `data` are persisted to `models/intention_result.joblib`.
 
 ---
 
 ## Implementation
 
-**`02_intention_model.py`**:
+**`intention_model.py`**:
 - `fit(df, ...)` — prepares data and fits one Bambi model per response
 - `predict_intended(result, swings)` — applies posterior-mean linear predictor to the full swing frame
 - `swing_deviations(swings, intended_df)` — adds `{metric}_dev` columns
 - `calibrate(swings_with_devs)` — within-batter bias/RMSE/correlation summary
 
-**`04_run_pipeline.py`** — Phase A runs first; output cached to `models/intended_df.parquet`. Use `--skip-phase-a` to reload without refitting when iterating on Phase B.
+**`run_pipeline.py`** — Phase A runs first; output cached to `models/intended_df.parquet`. Use `--skip-phase-a` to reload without refitting when iterating on Phase B.
 
 ---
 

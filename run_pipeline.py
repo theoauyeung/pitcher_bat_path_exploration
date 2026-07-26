@@ -19,8 +19,8 @@ import numpy as np
 import pandas as pd
 
 from importlib import import_module as _im
-_A  = _im("02_intention_model")
-_B  = _im("03_causal_models")
+_A  = _im("intention_model")
+_B  = _im("causal_models")
 
 
 def get_secret(name):

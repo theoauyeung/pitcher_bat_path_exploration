@@ -18,13 +18,13 @@ We exploit the neuromuscular timing asymmetry: a batter cannot react to ball mov
 ## Pipeline
 
 ```bash
-python 00_pull_data.py          # pull MLB pitch-by-pitch from mlb_db → data/
-python 01_precommit_split.py    # compute pre/post-commit trajectory split
+python pull_data.py          # pull MLB pitch-by-pitch from mlb_db → data/
+python precommit_split.py    # compute pre/post-commit trajectory split
 python run_values.py            # build RE24, linear weights
-python 04_run_pipeline.py       # Phase A + Phase B → results/xrv_causal.parquet
+python run_pipeline.py       # Phase A + Phase B → results/xrv_causal.parquet
 ```
 
-`04_run_pipeline.py` also accepts `--skip-phase-a` to reload cached Phase A output and `--method vi` for fast ADVI inference (~2 min vs. hours for MCMC).
+`run_pipeline.py` also accepts `--skip-phase-a` to reload cached Phase A output and `--method vi` for fast ADVI inference (~2 min vs. hours for MCMC).
 
 Visualization scripts (run after pipeline):
 
@@ -159,7 +159,7 @@ On Mac, `Rscript` will be on PATH after the brew install — no hardcoded path n
 
 ```bash
 .venv/bin/python results_scripts/generate_results.py reliability
-# → should write results/figures/08_reliability.png without errors
+# → should write results/figures/reliability.png without errors
 ```
 
 ### Machine-specific things that change
@@ -169,7 +169,7 @@ On Mac, `Rscript` will be on PATH after the brew install — no hardcoded path n
 | Python venv activate | `.venv\Scripts\activate` | `source .venv/bin/activate` |
 | Python binary | `.venv\Scripts\python.exe` | `.venv/bin/python` |
 | Rscript path | `C:\Users\theo.an-yeung\AppData\Local\Programs\R\R-4.6.0\bin\Rscript.exe` | `Rscript` (on PATH via brew) |
-| DB access (`00_pull_data.py`) | Requires internal network / VPN | Same — needs VPN or on-site |
+| DB access (`pull_data.py`) | Requires internal network / VPN | Same — needs VPN or on-site |
 
 ### What you don't need to rerun
 
@@ -181,9 +181,9 @@ With the bundle in place, you can immediately run `generate_results.py` and `lea
 - [ ] Download the bundle; confirm the zip is 3.29 GB before unzipping
 - [ ] `git clone` and `unzip` as above
 - [ ] `uv venv --python 3.14` — if uv can't find 3.14, run `uv python install 3.14` first
-- [ ] Run the verify command and confirm it writes `results/figures/08_reliability.png` without errors
+- [ ] Run the verify command and confirm it writes `results/figures/reliability.png` without errors
 - [ ] Install R and R packages if you want to regenerate leaderboard tables
-- [ ] For DB access (`00_pull_data.py`): connect to VPN or be on-site at Driveline
+- [ ] For DB access (`pull_data.py`): connect to VPN or be on-site at Driveline
 
 > **Access risk:** The bundle is in your Driveline work OneDrive. If you lose access to the Driveline account, the bundle is inaccessible. Consider downloading a personal backup copy to a USB or personal cloud before returning the machine.
 

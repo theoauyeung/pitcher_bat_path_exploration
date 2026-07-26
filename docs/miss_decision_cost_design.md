@@ -225,14 +225,14 @@ $\tau_{\text{adj},i} \leq \tau_{\text{total},i}$ always. When swinging was optim
 
 ## Implementation
 
-**`03_causal_models.py`** — new functions in sections 6 and 7:
+**`causal_models.py`** — new functions in sections 6 and 7:
 - `fit_miss_models(df, commit_ms=150)` → `(whiff_miss_model, contact_miss_model, miss_rv_slope)`
 - `compute_miss_distortion_tax(df, whiff_miss_model, contact_miss_model, miss_rv_slope, whiff_rv, commit_ms=150)` → Series
 - `compute_decision_cost(df, count_values_path, commit_ms=150, xrv_intended=None)` → Series
 
 `disruption_tax_split` exposes `_xrv_intended` as an internal column (stripped before save) so `compute_decision_cost` doesn't need to recompute it.
 
-**`04_run_pipeline.py`** — wired after Stage 4 (outcome models) and Stage 5 (disruption tax):
+**`run_pipeline.py`** — wired after Stage 4 (outcome models) and Stage 5 (disruption tax):
 - Miss models fit in parallel with outcome models
 - `miss_distortion_tax` and `decision_cost` computed immediately after disruption tax split
 - Both columns added to `tax_cols`, CSV aggregations (`mean_miss_distortion_tax`, `mean_decision_cost`), and `causal_models.joblib`
