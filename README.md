@@ -90,12 +90,84 @@ Large files (`data/`, `models/*.joblib`, `results/*.parquet` > 25 MB) are not tr
 
 ## Dependencies
 
+This project uses [uv](https://docs.astral.sh/uv/) and Python **3.14**. All direct dependencies are pinned in `requirements.txt`.
+
 ```bash
-python -m venv .venv
-.venv\Scripts\pip install -r requirements.txt   # Windows
+# Install uv (once per machine)
+curl -LsSf https://astral.sh/uv/install.sh | sh     # Mac/Linux
+# or: brew install uv
+
+# Create venv and install
+uv venv --python 3.14
+source .venv/bin/activate                           # Mac/Linux
+# Windows: .venv\Scripts\activate
+uv pip install -r requirements.txt
 ```
 
-Core packages: `bambi`, `pymc`, `statsmodels`, `xgboost`, `pandas`, `numpy`, `matplotlib`, `sqlalchemy`, `pymysql`.
+---
+
+## Resuming on a new Mac
+
+### 1 — Get the data bundle
+
+Download `pitcher_bat_path_bundle.zip` from OneDrive (Driveline email account → OneDrive → top level).
+
+### 2 — Clone and unzip
+
+```bash
+git clone https://github.com/theoauyeung/pitcher_bat_path_exploration.git
+cd pitcher_bat_path_exploration
+unzip /path/to/pitcher_bat_path_bundle.zip   # extracts into data/, models/, results/
+```
+
+The zip uses repo-relative paths so it unpacks directly into the right directories.
+
+### 3 — Set up Python
+
+```bash
+# Install uv if not already present
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source ~/.cargo/env   # or open a new terminal
+
+uv venv --python 3.14
+source .venv/bin/activate
+uv pip install -r requirements.txt
+```
+
+If Python 3.14 is not available yet via uv, install it first:
+```bash
+uv python install 3.14
+```
+
+### 4 — Set up R (for leaderboard tables)
+
+```bash
+brew install r
+# R packages (run once inside R or Rscript):
+Rscript -e 'install.packages(c("arrow","dplyr","gt","gtExtras","mlbplotR","scales","webshot2"))'
+```
+
+On Mac, `Rscript` will be on PATH after the brew install — no hardcoded path needed. The R script (`results_scripts/leaderboard_table.R`) uses only `Rscript` by name and is cross-platform.
+
+### 5 — Verify
+
+```bash
+.venv/bin/python results_scripts/generate_results.py reliability
+# → should write results/figures/08_reliability.png without errors
+```
+
+### Machine-specific things that change
+
+| Item | Old (Windows) | New (Mac) |
+|------|--------------|-----------|
+| Python venv activate | `.venv\Scripts\activate` | `source .venv/bin/activate` |
+| Python binary | `.venv\Scripts\python.exe` | `.venv/bin/python` |
+| Rscript path | `C:\Users\theo.an-yeung\AppData\Local\Programs\R\R-4.6.0\bin\Rscript.exe` | `Rscript` (on PATH via brew) |
+| DB access (`00_pull_data.py`) | Requires internal network / VPN | Same — needs VPN or on-site |
+
+### What you don't need to rerun
+
+With the bundle in place, you can immediately run `generate_results.py` and `leaderboard_table.R` to regenerate all figures. You only need to rerun the pipeline (`00`–`04`) if you want fresh data from the DB.
 
 ---
 
