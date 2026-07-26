@@ -29,8 +29,14 @@ python 04_run_pipeline.py       # Phase A + Phase B → results/xrv_causal.parqu
 Visualization scripts (run after pipeline):
 
 ```bash
-python results_scripts/06_kinematic_diagram.py     # annotated broadcast cards per pitch
-python results_scripts/07_intention_diagnostics.py # Phase A model diagnostics
+# All paper figures (or pass individual keys: axis, reliability, drivers, etc.)
+.venv/bin/python results_scripts/generate_results.py
+
+# Annotated broadcast cards per pitch (requires DB connection)
+.venv/bin/python results_scripts/kinematic_diagram.py
+
+# Leaderboard tables with MLB headshots (requires R)
+Rscript results_scripts/leaderboard_table.R
 ```
 
 ---
@@ -168,6 +174,18 @@ On Mac, `Rscript` will be on PATH after the brew install — no hardcoded path n
 ### What you don't need to rerun
 
 With the bundle in place, you can immediately run `generate_results.py` and `leaderboard_table.R` to regenerate all figures. You only need to rerun the pipeline (`00`–`04`) if you want fresh data from the DB.
+
+### Personal checklist (do this yourself on the new Mac)
+
+- [ ] Sign into OneDrive with your Driveline account and wait for sync to show "Up to date" on `pitcher_bat_path_bundle.zip` before downloading (3.3 GB — allow 10–20 min upload time on the source machine)
+- [ ] Download the bundle; confirm the zip is 3.29 GB before unzipping
+- [ ] `git clone` and `unzip` as above
+- [ ] `uv venv --python 3.14` — if uv can't find 3.14, run `uv python install 3.14` first
+- [ ] Run the verify command and confirm it writes `results/figures/08_reliability.png` without errors
+- [ ] Install R and R packages if you want to regenerate leaderboard tables
+- [ ] For DB access (`00_pull_data.py`): connect to VPN or be on-site at Driveline
+
+> **Access risk:** The bundle is in your Driveline work OneDrive. If you lose access to the Driveline account, the bundle is inaccessible. Consider downloading a personal backup copy to a USB or personal cloud before returning the machine.
 
 ---
 

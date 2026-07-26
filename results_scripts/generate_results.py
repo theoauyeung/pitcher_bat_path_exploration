@@ -4,14 +4,14 @@ All paper figures from one script.
 
 Usage
 -----
-    .venv\\Scripts\\python.exe results_scripts/generate_results.py              # all
-    .venv\\Scripts\\python.exe results_scripts/generate_results.py axis         # one key
-    .venv\\Scripts\\python.exe results_scripts/generate_results.py reliability leaderboard
+    .venv/bin/python results_scripts/generate_results.py              # all
+    .venv/bin/python results_scripts/generate_results.py axis         # one key
+    .venv/bin/python results_scripts/generate_results.py reliability leaderboard
 
 Figure keys
 -----------
     leaderboard   — EB-shrunk distortion tax bar chart (2024)
-    axis          — Angular axis fingerprint: VAA/HAA/Tilt dominance by handedness  [NEW]
+    axis          — Angular axis fingerprint: VAA/HAA/Tilt dominance by handedness
     drivers       — Physical driver OLS forest plot
     incremental   — Incremental validity scatter
     outcomes      — Outcome rates by tax quintile
