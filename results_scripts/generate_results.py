@@ -25,6 +25,7 @@ Figure keys
 import sys
 from pathlib import Path
 
+import duckdb
 import joblib
 import numpy as np
 import pandas as pd
@@ -69,9 +70,28 @@ def _load(key, fn):
     return _cache[key]
 
 
-def xrv():  return _load("xrv",  lambda: pd.read_parquet("results/xrv_causal.parquet"))
-def pc():   return _load("pc",   lambda: pd.read_parquet("data/swings_precommit.parquet"))
-def sxrv(): return _load("sxrv", lambda: pd.read_parquet("results/swing_xrv.parquet"))
+_PC_COLS = ", ".join([
+    "game_pk", "at_bat_number", "pitch_number", "game_year",
+    DEV_X, DEV_Z, "ball_bat_miss", "is_whiff",
+    "is_contact", "is_bip", "is_single", "is_double", "is_triple", "is_home_run",
+    "is_swing", "bat_speed", "count_group", "balls", "strikes", "vert_attack_angle",
+    "pitcher_full_name", "pitch_type",
+    f"pc{COMMIT_MS}_R_x", f"pc{COMMIT_MS}_R_y", f"pc{COMMIT_MS}_R_z",
+    f"pc{COMMIT_MS}_V_x", f"pc{COMMIT_MS}_V_y", f"pc{COMMIT_MS}_V_z",
+    f"pc{COMMIT_MS}_A_x", f"pc{COMMIT_MS}_A_y", f"pc{COMMIT_MS}_A_z",
+    f"pc{COMMIT_MS}_t_plate",
+])
+
+_SXRV_COLS = ", ".join([
+    "game_pk", "at_bat_number", "pitch_number", "pitcher_id", "pitcher_full_name",
+    "pfx_x", "pfx_z", "release_speed", "release_extension", "arm_angle",
+    "ivb_transverse", "hb_transverse", "pitcher_throws", "stuff_grade", "xrv_vs_count", "xrv",
+])
+
+
+def xrv():  return _load("xrv",  lambda: duckdb.sql("SELECT * FROM read_parquet('results/xrv_causal.parquet')").df())
+def pc():   return _load("pc",   lambda: duckdb.sql(f"SELECT {_PC_COLS} FROM read_parquet('data/swings_precommit.parquet')").df())
+def sxrv(): return _load("sxrv", lambda: duckdb.sql(f"SELECT {_SXRV_COLS} FROM read_parquet('results/swing_xrv.parquet')").df())
 
 
 def merged():

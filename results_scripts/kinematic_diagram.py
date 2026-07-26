@@ -390,10 +390,10 @@ def make_broadcast_annotation(
 
 # ── Screenshot paths ──────────────────────────────────────────────────────────
 
-_YB_SCREENSHOT = r"screenshots for kin diagrams\Screenshot 2026-06-22 100819.png"
-_LR_SCREENSHOT = r"screenshots for kin diagrams\Screenshot 2026-06-23 102000.png"
-_HM_SCREENSHOT = r"screenshots for kin diagrams\Screenshot 2026-06-23 104858.png"
-_SH_SCREENSHOT = r"screenshots for kin diagrams\Screenshot 2026-06-23 105031.png"
+_YB_SCREENSHOT = "screenshots for kin diagrams/Screenshot 2026-06-22 100819.png"
+_LR_SCREENSHOT = "screenshots for kin diagrams/Screenshot 2026-06-23 102000.png"
+_HM_SCREENSHOT = "screenshots for kin diagrams/Screenshot 2026-06-23 104858.png"
+_SH_SCREENSHOT = "screenshots for kin diagrams/Screenshot 2026-06-23 105031.png"
 
 
 # ── Load metrics from data ────────────────────────────────────────────────────
