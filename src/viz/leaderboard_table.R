@@ -3,7 +3,7 @@
 # Produces two PNGs: sorted by xRV Residual and by Distortion Tax.
 #
 # Run from project root:
-#   Rscript results_scripts/leaderboard_table.R
+#   Rscript src/viz/leaderboard_table.R
 #
 # Required packages:
 #   install.packages(c("arrow", "dplyr", "gt", "gtExtras", "mlbplotR", "scales", "webshot2"))
@@ -14,7 +14,7 @@ library(gt)
 library(mlbplotR)
 library(scales)
 
-dir.create("results/figures", showWarnings = FALSE, recursive = TRUE)
+dir.create("results/plots/leaderboards", showWarnings = FALSE, recursive = TRUE)
 
 # ── Load data ─────────────────────────────────────────────────────────────────
 
@@ -137,7 +137,7 @@ tbl_xrv <- top18_xrv |>
   ) |>
   apply_style()
 
-save_png(tbl_xrv, "results/figures/leaderboard_total_burden.png")
+save_png(tbl_xrv, "results/plots/leaderboards/leaderboard_total_burden.png")
 
 # ── Table 2: top 18 by Distortion Tax percentile ──────────────────────────────
 # MissTax: physical bat-to-ball miss channel — independent corroboration of Distortion.
@@ -174,7 +174,7 @@ tbl_dist <- top18_dist |>
   ) |>
   apply_style()
 
-save_png(tbl_dist, "results/figures/leaderboard_distortion.png")
+save_png(tbl_dist, "results/plots/leaderboards/leaderboard_distortion.png")
 
 # ── Table 3: combined bottom / top distortion tax (pitcher-season, 2024, EB-shrunk) ─────
 # Reads EB-shrunk values from results/leaderboard.csv (written by skill_analysis.py).
@@ -250,4 +250,4 @@ tbl_combined <- combined |>
   ) |>
   apply_style()
 
-save_png(tbl_combined, "results/figures/distortion_tax_leaderboard_2024.png")
+save_png(tbl_combined, "results/plots/leaderboards/distortion_tax_leaderboard_2024.png")

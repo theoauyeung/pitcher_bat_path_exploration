@@ -6,13 +6,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 # Always use the project venv, not system Python
-.venv/bin/python pull_data.py          # data/swings_2023_2025.csv
-.venv/bin/python precommit_split.py    # data/swings_precommit.parquet
-.venv/bin/python run_values.py         # results/linear_weights.csv, count_values.csv
-.venv/bin/python run_pipeline.py       # results/xrv_causal.parquet + leaderboards
+.venv/bin/python src/data/pull_data.py          # data/swings_2023_2025.csv
+.venv/bin/python src/data/precommit_split.py    # data/swings_precommit.parquet
+.venv/bin/python src/data/run_values.py         # results/linear_weights.csv, count_values.csv
+.venv/bin/python src/models/run_pipeline.py     # results/xrv_causal.parquet + leaderboards
 ```
 
-Scripts must run in order. `run_pipeline.py` is the entry point for Phase A + Phase B; it imports `intention_model` and `causal_models` directly.
+Scripts must run in order. `src/models/run_pipeline.py` is the entry point for Phase A + Phase B; it imports `intention_model` and `causal_models` directly from `src/models/`.
 
 Use `--skip-phase-a` to reload the cached Phase A output (`models/intended_df.parquet`) without refitting — useful when iterating on Phase B alone.
 
@@ -42,7 +42,7 @@ Key column names to know:
 
 ### `db.py` — Database connection
 
-DuckDB connection helper used by `pull_data.py` and `results_scripts/generate_results.py`. Reads connection parameters from environment; do not hardcode credentials.
+DuckDB connection helper used by `src/data/pull_data.py` and `src/viz/generate_results.ipynb`. Reads connection parameters from environment; do not hardcode credentials.
 
 ### `pull_data.py` — Data pull
 

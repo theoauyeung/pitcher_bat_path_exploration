@@ -85,12 +85,12 @@ Finally, the case illustrations underscore that the metric's interpretive power 
 ---
 
 *Figures referenced in this section:*
-- **Figure [reliability table]**: `results/figures/reliability.png` — ICC(2,1) and Spearman-Brown split-half r across all four metrics, with year-over-year Pearson r for 2023–2024 and 2024–2025 transitions.
-- **Figure [kinematic — Yamamoto/Bernabéi]**: `results/figures/yamamoto_bernabel_annotation.png` — broadcast card: 76.1 mph curveball, 2-0 count, 5.7" post-commit drop, 99.7% distortion.
-- **Figure [kinematic — Leiter/Ramírez]**: `results/figures/leiter_ramirez_annotation.png` — broadcast card: 73.4 mph curveball, 1-0 count, 6.0" post-commit drop, 0% distortion (selection-dominant).
-- **Figure [kinematic — Helsley/Mullins]**: `results/figures/helsley_mullins_annotation.png` — broadcast card: 100.0 mph four-seam, 1-2 count, 1.4" post-commit deviation, 5% distortion (self-selected chase).
-- **Figure [kinematic — Sale/Harper]**: `results/figures/sale_harper_annotation.png` — broadcast card: 77.7 mph slider, 0-1 count, 4.5" post-commit drop, 56.7% distortion, 40.4" ball-bat miss.
-- **Figure [leaderboard]**: `results/figures/distortion_tax_leaderboard_2024.png` — empirical-Bayes shrunk distortion tax for the 10 most pitcher-advantageous (red group header) and 10 most batter-favorable (blue group header) pitchers in 2024; MLB headshots, percentile heatmap cells, min 200 swings.
-- **Figure [axis fingerprint]**: `results/figures/axis_fingerprint.png` — left: scatter of VAA_share vs. tilt margin by pitcher-season, colored by handedness (RHP blue, LHP red), dashed y=0 HAA-dominance boundary; right: population breakdown bar (Tilt 94.4%, HAA 5.6%, VAA 0%) with all-LHP annotation.
-- **Figure [physical drivers]**: `results/figures/physical_drivers_ols.png` — OLS coefficient forest plot for physical drivers of distortion tax at the pitcher-pitch-type level (R² = 0.552, HC1 SE; red = p < 0.05).
-- **Figure [incremental validity]**: `results/figures/distortion_tax_incremental_validity.png` — scatter of 2024 mean distortion tax against 2025 mean ball-bat miss on whiffs by pitcher (n = 299).
+- **Figure [reliability table]**: `results/plots/validation/reliability.png` — ICC(2,1) and Spearman-Brown split-half r across all four metrics, with year-over-year Pearson r for 2023–2024 and 2024–2025 transitions.
+- **Figure [kinematic — Yamamoto/Bernabéi]**: `results/plots/case_studies/yamamoto_bernabel_annotation.png` — broadcast card: 76.1 mph curveball, 2-0 count, 5.7" post-commit drop, 99.7% distortion.
+- **Figure [kinematic — Leiter/Ramírez]**: `results/plots/case_studies/leiter_ramirez_annotation.png` — broadcast card: 73.4 mph curveball, 1-0 count, 6.0" post-commit drop, 0% distortion (selection-dominant).
+- **Figure [kinematic — Helsley/Mullins]**: `results/plots/case_studies/helsley_mullins_annotation.png` — broadcast card: 100.0 mph four-seam, 1-2 count, 1.4" post-commit deviation, 5% distortion (self-selected chase).
+- **Figure [kinematic — Sale/Harper]**: `results/plots/case_studies/sale_harper_annotation.png` — broadcast card: 77.7 mph slider, 0-1 count, 4.5" post-commit drop, 56.7% distortion, 40.4" ball-bat miss.
+- **Figure [leaderboard]**: `results/plots/leaderboards/distortion_tax_leaderboard_2024.png` — empirical-Bayes shrunk distortion tax for the 10 most pitcher-advantageous (red group header) and 10 most batter-favorable (blue group header) pitchers in 2024; MLB headshots, percentile heatmap cells, min 200 swings.
+- **Figure [axis fingerprint]**: `results/plots/diagnostics/axis_fingerprint.png` — left: scatter of VAA_share vs. tilt margin by pitcher-season, colored by handedness (RHP blue, LHP red), dashed y=0 HAA-dominance boundary; right: population breakdown bar (Tilt 94.4%, HAA 5.6%, VAA 0%) with all-LHP annotation.
+- **Figure [physical drivers]**: `results/plots/diagnostics/physical_drivers_ols.png` — OLS coefficient forest plot for physical drivers of distortion tax at the pitcher-pitch-type level (R² = 0.552, HC1 SE; red = p < 0.05).
+- **Figure [incremental validity]**: `results/plots/validation/distortion_tax_incremental_validity.png` — scatter of 2024 mean distortion tax against 2025 mean ball-bat miss on whiffs by pitcher (n = 299).

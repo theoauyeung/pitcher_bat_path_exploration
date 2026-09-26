@@ -18,10 +18,10 @@ A batter cannot react to ball movement that occurs within ~150 ms of contact. An
 ## Pipeline
 
 ```bash
-.venv/bin/python pull_data.py          # pull MLB pitch-by-pitch from mlb_db → data/
-.venv/bin/python precommit_split.py    # compute pre/post-commit trajectory split
-.venv/bin/python run_values.py         # build RE24, linear weights
-.venv/bin/python run_pipeline.py       # Phase A + Phase B → results/xrv_causal.parquet
+.venv/bin/python src/data/pull_data.py          # pull MLB pitch-by-pitch from mlb_db → data/
+.venv/bin/python src/data/precommit_split.py    # compute pre/post-commit trajectory split
+.venv/bin/python src/data/run_values.py         # build RE24, linear weights
+.venv/bin/python src/models/run_pipeline.py       # Phase A + Phase B → results/xrv_causal.parquet
 ```
 
 `run_pipeline.py` accepts `--skip-phase-a` to reload cached Phase A output without refitting, and `--method vi` for fast ADVI inference (~2 min vs. hours for MCMC).
@@ -30,13 +30,13 @@ Visualization scripts (run after pipeline):
 
 ```bash
 # All paper figures (or pass individual keys: axis, reliability, drivers, etc.)
-.venv/bin/python results_scripts/generate_results.py
+.venv/bin/python src/generate_results.ipynb
 
 # Annotated broadcast cards per pitch (requires DB connection)
-.venv/bin/python results_scripts/kinematic_diagram.py
+.venv/bin/python src/viz/kinematic_diagram.py
 
 # Leaderboard tables with MLB headshots (requires R)
-Rscript results_scripts/leaderboard_table.R
+Rscript src/viz/leaderboard_table.R
 ```
 
 ---
@@ -48,7 +48,7 @@ Rscript results_scripts/leaderboard_table.R
 | `results/xrv_causal.parquet` | Per-swing disruption / adjusted disruption / distortion / selection / spatial distortion / miss / decision cost |
 | `results/distortion_pitcher.csv` | Pitcher-level distortion leaderboard (≥50 swings) |
 | `results/distortion_batter.csv` | Batter-level disruption leaderboard (≥50 swings) |
-| `results/figures/` | Kinematic diagrams and intention model diagnostics |
+| `results/plots/` | Kinematic diagrams and intention model diagnostics |
 
 ---
 
@@ -202,11 +202,11 @@ Rscript -e 'install.packages(c("arrow","dplyr","gt","gtExtras","mlbplotR","scale
 ### 5 — Verify everything works
 
 ```bash
-# Should write results/figures/reliability.png — no network or DB needed
-.venv/bin/python results_scripts/generate_results.py reliability
+# Should write results/plots/validation/reliability.png — no network or DB needed
+.venv/bin/python src/generate_results.ipynb reliability
 
-# Should write results/figures/*.png for all leaderboard tables — no network or DB needed
-Rscript results_scripts/leaderboard_table.R
+# Should write results/plots/ for all leaderboard tables — no network or DB needed
+Rscript src/viz/leaderboard_table.R
 ```
 
 Both commands run fully offline from the bundle files.
@@ -233,9 +233,9 @@ No hardcoded Windows paths exist in the Python or R scripts — all paths use fo
 - [ ] `git clone https://github.com/theoauyeung/pitcher_bat_path_exploration.git && cd pitcher_bat_path_exploration`
 - [ ] `unzip ~/Downloads/pitcher_bat_path_bundle.zip -d .` — confirms `data/`, `models/`, `results/` land in repo root
 - [ ] `uv python install 3.14 && uv venv --python 3.14 && source .venv/bin/activate && uv pip install -r requirements.txt`
-- [ ] `.venv/bin/python results_scripts/generate_results.py reliability` — confirm it writes `results/figures/reliability.png` with no errors
+- [ ] `.venv/bin/python src/generate_results.ipynb reliability` — confirm it writes `results/plots/validation/reliability.png` with no errors
 - [ ] `brew install r` then `Rscript -e 'install.packages(c("arrow","dplyr","gt","gtExtras","mlbplotR","scales","webshot2"), repos="https://cloud.r-project.org")'`
-- [ ] `Rscript results_scripts/leaderboard_table.R` — confirm three PNGs saved to `results/figures/`
+- [ ] `Rscript src/viz/leaderboard_table.R` — confirm three PNGs saved to `results/plots/`
 
 ---
 

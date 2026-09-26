@@ -5,8 +5,8 @@ Kinematic diagram: post-commit trajectory distortion.
 Run:
     .venv/Scripts/python.exe 06_kinematic_diagram.py
 
-Saves: results/figures/yamamoto_bernabel_annotation.png
-       results/figures/bradley_alonso_annotation.png
+Saves: results/plots/case_studies/yamamoto_bernabel_annotation.png
+       results/plots/case_studies/bradley_alonso_annotation.png
 """
 
 import os
@@ -415,7 +415,7 @@ _SH = load_pitch_metrics(778406, 2, 2)    # SL 77.7 mph, 40.4" miss, 99.6% selec
 
 # ── Render ────────────────────────────────────────────────────────────────────
 
-Path("results/figures").mkdir(parents=True, exist_ok=True)
+Path("results/plots/case_studies").mkdir(parents=True, exist_ok=True)
 
 # Yamamoto/Bernabel — distortion case (91% distortion)
 _yb_dev  = abs(_YB["pc_dev_z_in"])
@@ -426,10 +426,10 @@ fig_yb = make_broadcast_annotation(
     callout_label  = f"−{_yb_dev:.1f}\" below\nprojected path",
     callout_color  = RED,
 )
-fig_yb.savefig("results/figures/yamamoto_bernabel_annotation.png",
+fig_yb.savefig("results/plots/case_studies/yamamoto_bernabel_annotation.png",
                dpi=180, bbox_inches="tight")
 plt.close()
-print("Saved: results/figures/yamamoto_bernabel_annotation.png")
+print("Saved: results/plots/case_studies/yamamoto_bernabel_annotation.png")
 
 
 
@@ -442,10 +442,10 @@ fig_lr = make_broadcast_annotation(
     callout_label  = f"−{_lr_dev:.1f}\" below\nprojected path",
     callout_color  = RED,
 )
-fig_lr.savefig("results/figures/leiter_ramirez_annotation.png",
+fig_lr.savefig("results/plots/case_studies/leiter_ramirez_annotation.png",
                dpi=180, bbox_inches="tight")
 plt.close()
-print("Saved: results/figures/leiter_ramirez_annotation.png")
+print("Saved: results/plots/case_studies/leiter_ramirez_annotation.png")
 
 # Helsley/Mullins — selection case (99.4% selection, FF 100 mph above zone)
 _hm_dev = abs(_HM["pc_dev_z_in"])
@@ -456,10 +456,10 @@ fig_hm = make_broadcast_annotation(
     callout_label  = f"−{_hm_dev:.1f}\" off projected\npure swing decision",
     callout_color  = AMBER,
 )
-fig_hm.savefig("results/figures/helsley_mullins_annotation.png",
+fig_hm.savefig("results/plots/case_studies/helsley_mullins_annotation.png",
                dpi=180, bbox_inches="tight")
 plt.close()
-print("Saved: results/figures/helsley_mullins_annotation.png")
+print("Saved: results/plots/case_studies/helsley_mullins_annotation.png")
 
 # Sale/Harper — selection case (99.6% selection, SL 77.7 mph, 40.4" miss)
 _sh_dev = abs(_SH["pc_dev_z_in"])
@@ -470,7 +470,7 @@ fig_sh = make_broadcast_annotation(
     callout_label  = f"−{_sh_dev:.1f}\" off projected\n40.4\" miss — batter decision",
     callout_color  = AMBER,
 )
-fig_sh.savefig("results/figures/sale_harper_annotation.png",
+fig_sh.savefig("results/plots/case_studies/sale_harper_annotation.png",
                dpi=180, bbox_inches="tight")
 plt.close()
-print("Saved: results/figures/sale_harper_annotation.png")
+print("Saved: results/plots/case_studies/sale_harper_annotation.png")

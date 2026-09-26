@@ -1,8 +1,10 @@
 # Large data files
 data/
+!src/data/
 
 # Large model binaries
 models/
+!src/models/
 
 # Videos
 videos/
