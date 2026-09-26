@@ -40,17 +40,13 @@ Key column names to know:
 
 ## What each script does
 
-### `db.py` — Database connection
-
-DuckDB connection helper used by `src/data/pull_data.py` and `src/viz/generate_results.ipynb`. Reads connection parameters from environment; do not hardcode credentials.
-
-### `pull_data.py` — Data pull
+### `src/data/pull_data.py` — Data pull
 
 Pulls all pitches (not just swings) so sequence lag features (`prev_pitch_type`, `velo_delta`, location deltas) capture what the batter saw on the previous pitch, including takes. After lags are computed, non-swings are dropped.
 
 Output: `data/swings_2023_2025.csv` (~760k swing rows). Bat-tracking columns will be NaN for 2023 pitches before mid-season rollout.
 
-### `precommit_split.py` — Pre/post-commit trajectory split
+### `src/data/precommit_split.py` — Pre/post-commit trajectory split
 
 Reconstructs each pitch's full flight path from release parameters, then computes where the ball *would have* crossed the plate if it had continued on a constant trajectory from the batter's commit time (~150 ms pre-contact). The gap between that projected location and the actual plate crossing is the post-commit deviation — movement the batter had no time to react to.
 
@@ -58,7 +54,11 @@ Default commit time is 150 ms. This is deliberately conservative (understates di
 
 Output: `data/swings_precommit.parquet` with `pc{ms}_dev_x/z`, `pc{ms}_x_proj/z_proj`, and 9-parameter trajectory columns for each commit time in the grid.
 
-### `intention_model.py` — Phase A: batter intended swing (imported by `run_pipeline.py`)
+### `src/data/run_values.py` — RE24 and linear weights
+
+Computes run expectancy tables and linear weights from the full pitch dataset. Must run before `src/models/run_pipeline.py`.
+
+### `src/models/intention_model.py` — Phase A: batter intended swing (imported by `run_pipeline.py`)
 
 Fits a Bayesian LMM per swing-shape response (VAA, HAA, swing path tilt, bat speed, swing length) using count, pitch location, contact timing, and platoon handedness as predictors, with per-batter random effects. The model captures what each batter *intended* to do given the information available at swing time.
 
@@ -66,7 +66,7 @@ The residual `realized − intended` is the swing deviation mediator that Phase 
 
 Key behavior: `method="vi"` (ADVI) is the default — only posterior means are used downstream so it's equivalent to MCMC and takes ~2 min instead of hours. Phase A output is cached to `models/intended_df.parquet`; Bambi model objects cannot be pickled on Python 3.14.
 
-### `causal_models.py` — Phase B: run-value mediation (imported by `run_pipeline.py`)
+### `src/models/causal_models.py` — Phase B: run-value mediation (imported by `run_pipeline.py`)
 
 Two sets of models:
 
@@ -100,17 +100,29 @@ adjusted_disruption_tax = disruption_tax − max(0, decision_cost)
 
 `angular_distortion_share` uses squared-norm decomposition across the three angular axes. Spatial disruption is fully attributed to distortion by construction. `adjusted_disruption_tax` is additive — equals `disruption_tax` when swinging was correct; shifts baseline to `take_xrv` when taking was better.
 
-### `run_pipeline.py` — Orchestrator
+### `src/models/run_pipeline.py` — Orchestrator
 
 Runs Phase A → Phase B in sequence and writes all outputs. Key flag: `--skip-phase-a` loads cached Phase A output. Use `method="vi"` for fast iteration.
 
-### `run_values.py` — RE24 and linear weights
+### `src/viz/generate_results.ipynb` — Paper figures
 
-Computes run expectancy tables and linear weights from the full pitch dataset. Must run before `run_pipeline.py`.
+Jupyter notebook that generates all paper figures from cached pipeline outputs. Open and run all cells in Jupyter or VS Code — no DB connection needed. Writes PNGs to `results/plots/` subdirectories.
 
-### `watch_commit.py` — Live trajectory monitor
+### `src/viz/kinematic_diagram.py` — Annotated broadcast cards
 
-Development utility for inspecting the pre/post-commit trajectory split on individual pitches. Not part of the production pipeline.
+Generates two-panel broadcast cards for individual pitches (game screenshot + metrics panel). Requires DB connection. Writes to `results/plots/case_studies/`.
+
+### `src/viz/leaderboard_table.R` — Leaderboard tables
+
+Builds styled leaderboard tables with MLB headshots using `gt` / `gtExtras`. Reads from `results/distortion_pitcher.csv`. Writes to `results/plots/leaderboards/`.
+
+### `src/utils/db.py` — DuckDB connection helper
+
+Creates views over the project parquets (`swings`, `xrv`, `swing_xrv`, `intended`) for ad-hoc SQL queries. Used by `src/viz/generate_results.ipynb`. Reads connection parameters from environment; do not hardcode credentials.
+
+### `src/utils/watch_commit.py` — Auto-commit watcher
+
+Development utility that polls for file changes and auto-commits to git after a debounce period. Not part of the production pipeline.
 
 ---
 
@@ -121,6 +133,10 @@ Development utility for inspecting the pre/post-commit trajectory split on indiv
 | `results/xrv_causal.parquet` | Per-swing: `disruption_tax`, `adjusted_disruption_tax`, `distortion_tax`, `selection_tax`, `spatial_distortion_tax`, `distortion_share`, `miss_distortion_tax`, `decision_cost` |
 | `results/distortion_pitcher.csv` | Pitcher-level leaderboard (≥50 swings) |
 | `results/distortion_batter.csv` | Batter-level leaderboard (≥50 swings) |
+| `results/plots/leaderboards/` | Distortion tax leaderboard tables (PNG) |
+| `results/plots/validation/` | Reliability, xwOBA relationship, outcome rates (PNG) |
+| `results/plots/diagnostics/` | Axis fingerprint, count/fixed effects, physical drivers (PNG) |
+| `results/plots/case_studies/` | Annotated broadcast cards — Yamamoto, Leiter, Helsley, Sale (PNG) |
 | `models/intention_result.joblib` | Phase A idata + training data |
 | `models/intended_df.parquet` | Phase A per-swing intended swing shape (cache) |
 | `models/causal_models.joblib` | Phase B models |
