@@ -48,20 +48,24 @@ def _pc(commit_ms, suffix):
 
 # ── 1. Mediator models ──────────────────────────────────────────────────────────
 
-def fit_mediator_models(df, commit_ms=150):
+def fit_mediator_models(df, commit_ms=150, empirical=True):
     """Linear mixed-effects mediator models for each angular deviation axis.
 
     Response: {metric}_dev  (realized − intended, from Phase A)
-    Treatment: pc{ms}_dev_x, pc{ms}_dev_z  (post-commit movement)
+    Treatment: pc{ms}_{emp}dev_x/z  (post-commit movement; empirical or linear-projection)
     Controls: pre-commit projected plate location, pitch speed, count, timing
+
+    empirical=True  uses KNN-empirical expected plate location (emp_ columns).
+    empirical=False uses linear gravity-corrected extrapolation (dev_x/z columns).
 
     Returns dict mapping deviation column name → fitted MixedLMResults.
     """
     prefix = f"pc{commit_ms}"
-    dev_x  = f"{prefix}_dev_x"
-    dev_z  = f"{prefix}_dev_z"
-    x_proj = f"{prefix}_x_proj"
-    z_proj = f"{prefix}_z_proj"
+    emp    = "emp_" if empirical else ""
+    dev_x  = f"{prefix}_{emp}dev_x"
+    dev_z  = f"{prefix}_{emp}dev_z"
+    x_proj = f"{prefix}_{emp}x_proj"
+    z_proj = f"{prefix}_{emp}z_proj"
 
     needed = [dev_x, dev_z, x_proj, z_proj,
               "release_speed", "balls", "strikes", "offset_y_ms", "batter_id", "pitcher_id"]
@@ -136,7 +140,7 @@ def fit_outcome_models(df, commit_ms=150):
 # ── 3. Disruption tax ───────────────────────────────────────────────────────────
 
 def _xrv_from_shape(df, bip_model, foul_model, xwoba_model, whiff_rv, foul_rv,
-                    commit_ms=150, zero_angular=False, zero_spatial=False):
+                    commit_ms=150, zero_angular=False, zero_spatial=False, empirical=True):
     """Predict per-swing xRV for one of three counterfactual scenarios.
 
     zero_angular=False, zero_spatial=False → realized xRV (actual everything)
@@ -153,8 +157,9 @@ def _xrv_from_shape(df, bip_model, foul_model, xwoba_model, whiff_rv, foul_rv,
       xRV = P(BIP)×E[xwOBA|BIP] + P(foul)×foul_rv[count] + P(whiff)×whiff_rv[count]
     """
     prefix = f"pc{commit_ms}"
-    x_proj = f"{prefix}_x_proj"
-    z_proj = f"{prefix}_z_proj"
+    emp    = "emp_" if empirical else ""
+    x_proj = f"{prefix}_{emp}x_proj"
+    z_proj = f"{prefix}_{emp}z_proj"
 
     # Outcome models use plate_x / plate_z. When zero_spatial=True, substitute the
     # pre-commit projected location — Option B counterfactual ("ball stayed where
@@ -188,7 +193,7 @@ def _xrv_from_shape(df, bip_model, foul_model, xwoba_model, whiff_rv, foul_rv,
 
 
 def disruption_tax_split(df, bip_model, foul_model, xwoba_model, whiff_rv, foul_rv,
-                         mediator_models, commit_ms=150):
+                         mediator_models, commit_ms=150, empirical=True):
     """Full disruption tax with two-channel distortion/selection decomposition.
 
     Three xRV scenarios:
@@ -215,17 +220,18 @@ def disruption_tax_split(df, bip_model, foul_model, xwoba_model, whiff_rv, foul_
     Note: disruption_tax = distortion_tax + selection_tax is preserved exactly.
     """
     prefix    = f"pc{commit_ms}"
-    dev_x_col = f"{prefix}_dev_x"
-    dev_z_col = f"{prefix}_dev_z"
+    emp       = "emp_" if empirical else ""
+    dev_x_col = f"{prefix}_{emp}dev_x"
+    dev_z_col = f"{prefix}_{emp}dev_z"
 
     args = (df, bip_model, foul_model, xwoba_model, whiff_rv, foul_rv)
 
     xrv_realized = _xrv_from_shape(*args, commit_ms=commit_ms,
-                                    zero_angular=False, zero_spatial=False)
+                                    zero_angular=False, zero_spatial=False, empirical=empirical)
     xrv_spatial  = _xrv_from_shape(*args, commit_ms=commit_ms,
-                                    zero_angular=True,  zero_spatial=False)
+                                    zero_angular=True,  zero_spatial=False, empirical=empirical)
     xrv_intended = _xrv_from_shape(*args, commit_ms=commit_ms,
-                                    zero_angular=True,  zero_spatial=True)
+                                    zero_angular=True,  zero_spatial=True,  empirical=empirical)
 
     disruption_tax     = xrv_realized - xrv_intended
     spatial_distortion = xrv_spatial  - xrv_intended
@@ -273,7 +279,7 @@ def disruption_tax_split(df, bip_model, foul_model, xwoba_model, whiff_rv, foul_
 # ── 4. Indirect effect (product-of-coefficients) ───────────────────────────────
 
 def indirect_effect(mediator_models, bip_model, foul_model, xwoba_model,
-                    whiff_rv, foul_rv, df, commit_ms=150, eps=0.5):
+                    whiff_rv, foul_rv, df, commit_ms=150, eps=0.5, empirical=True):
     """Numerical indirect effect of post-commit movement on run value.
 
     Replaces the previous analytical formula (which required logistic model coefficients)
@@ -290,8 +296,9 @@ def indirect_effect(mediator_models, bip_model, foul_model, xwoba_model,
       [a_x, a_z, grad_xrv, indirect_x, indirect_z]
     """
     prefix = f"pc{commit_ms}"
-    dev_x  = f"{prefix}_dev_x"
-    dev_z  = f"{prefix}_dev_z"
+    emp    = "emp_" if empirical else ""
+    dev_x  = f"{prefix}_{emp}dev_x"
+    dev_z  = f"{prefix}_{emp}dev_z"
 
     d = df[OUTCOME_FEATURES + [dev_x, dev_z]].dropna()
 
@@ -381,7 +388,7 @@ def positive_control_check(df_with_tax, dev_total_col="pc150_dev_total",
 
 # ── 6. Physical miss models ─────────────────────────────────────────────────────
 
-def fit_miss_models(df, commit_ms=150):
+def fit_miss_models(df, commit_ms=150, empirical=True):
     """Fit physical bat-to-ball miss models predicting miss from post-commit movement.
 
     Whiff model:   ball_bat_miss (inches) on whiffs where Hawk-Eye measured it (~91%)
@@ -392,10 +399,11 @@ def fit_miss_models(df, commit_ms=150):
     miss_rv_slope is negative: more miss → fewer runs for batter.
     """
     prefix = f"pc{commit_ms}"
-    dev_x  = f"{prefix}_dev_x"
-    dev_z  = f"{prefix}_dev_z"
-    x_proj = f"{prefix}_x_proj"
-    z_proj = f"{prefix}_z_proj"
+    emp    = "emp_" if empirical else ""
+    dev_x  = f"{prefix}_{emp}dev_x"
+    dev_z  = f"{prefix}_{emp}dev_z"
+    x_proj = f"{prefix}_{emp}x_proj"
+    z_proj = f"{prefix}_{emp}z_proj"
 
     dev_terms = " + ".join(ANGULAR_DEVS)
     rhs    = f"{dev_x} + {dev_z} + {x_proj} + {z_proj} + {dev_terms} + balls + strikes"
@@ -427,7 +435,7 @@ def fit_miss_models(df, commit_ms=150):
 
 
 def compute_miss_distortion_tax(df, whiff_miss_model, contact_miss_model,
-                                 miss_rv_slope, whiff_rv, commit_ms=150):
+                                 miss_rv_slope, whiff_rv, commit_ms=150, empirical=True):
     """Per-swing run-value cost of movement-caused increase in physical bat-to-ball miss.
 
     Whiffs:   (movement_miss / ball_bat_miss) × whiff_rv[count]
@@ -443,8 +451,9 @@ def compute_miss_distortion_tax(df, whiff_miss_model, contact_miss_model,
     Returns Series aligned to df.index. Negative = pitcher advantage.
     """
     prefix = f"pc{commit_ms}"
-    dev_x  = f"{prefix}_dev_x"
-    dev_z  = f"{prefix}_dev_z"
+    emp    = "emp_" if empirical else ""
+    dev_x  = f"{prefix}_{emp}dev_x"
+    dev_z  = f"{prefix}_{emp}dev_z"
 
     result = pd.Series(np.nan, index=df.index)
 
@@ -477,7 +486,7 @@ def compute_miss_distortion_tax(df, whiff_miss_model, contact_miss_model,
 
 # ── 7. Decision cost ────────────────────────────────────────────────────────────
 
-def compute_decision_cost(df, count_values_path, commit_ms=150, xrv_intended=None):
+def compute_decision_cost(df, count_values_path, commit_ms=150, xrv_intended=None, empirical=True):
     """Per-swing opportunity cost of swinging vs. taking at the projected plate location.
 
     Evaluates the take value at x_proj / z_proj — the pre-commit location the batter's
@@ -499,8 +508,9 @@ def compute_decision_cost(df, count_values_path, commit_ms=150, xrv_intended=Non
     ball_rv[(b, s)]:        ERV(b+1, s) - ERV(b, s) for b<3; WALK_RV − ERV(3,s) for b=3
     """
     prefix     = f"pc{commit_ms}"
-    x_proj_col = f"{prefix}_x_proj"
-    z_proj_col = f"{prefix}_z_proj"
+    emp        = "emp_" if empirical else ""
+    x_proj_col = f"{prefix}_{emp}x_proj"
+    z_proj_col = f"{prefix}_{emp}z_proj"
 
     cv = pd.read_csv(count_values_path).set_index(["balls", "strikes"])["expected_run_value"].to_dict()
     WALK_RV = 0.33  # approximate mean run value of a walk (RE24 framework)

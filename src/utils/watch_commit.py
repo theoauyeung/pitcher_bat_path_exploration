@@ -17,7 +17,7 @@ from pathlib import Path
 POLL_INTERVAL = 2    # seconds between git status checks
 DEBOUNCE_SECS = 30   # seconds of quiet before committing — long enough for plot generation
 
-ROOT = Path(__file__).parent
+ROOT = Path(__file__).resolve().parents[2]  # repo root (src/utils/watch_commit.py → up 2)
 
 
 def _git(*args):

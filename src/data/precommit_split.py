@@ -2,10 +2,11 @@
 Pre/post-commit trajectory split.
 
 Reconstructs each pitch's full flight path from release parameters, then
-computes where the ball would have crossed the plate if it had continued on a
-constant-acceleration trajectory from commit time forward. The gap between
-that projected location and the actual plate crossing is the post-commit
-deviation — movement the batter had no time to react to.
+computes where the ball would have crossed the plate if it had followed a
+gravity-only trajectory from the commit point. The gap between that projected
+location and the actual plate crossing is the post-commit deviation — the
+spin-induced movement the batter could not anticipate. Gravity is excluded
+because batters fully expect it; only Magnus-force deviation counts as surprising.
 
 Commit time defaults to 150 ms pre-contact. This is deliberately conservative
 (understates distortion), so any measured effect is a lower bound.
@@ -22,12 +23,15 @@ Output: data/swings_precommit.parquet
 import numpy as np
 import pandas as pd
 from pathlib import Path
+from sklearn.neighbors import NearestNeighbors
 
 COMMIT_MS_DEFAULT = 150
 COMMIT_MS_GRID = [125, 150, 175, 200]
+EMPIRICAL_K = 50  # neighbors for empirical plate-location expectation
 
 # Physics constants matching Zobrist's hitter_advance_report.py
 GRAVITY_DROP_CONSTANT  = 523    # Tango gravity estimate (in·mph² units)
+GRAVITY_ACCEL_FTS2     = 32.174 # ft/s², standard gravity magnitude
 AVG_AIR_DENSITY        = 0.00537
 PLATE_SPEED_ESTIMATE   = 0.92
 DRAG_COEFFICIENT       = 0.327
@@ -123,9 +127,11 @@ def add_precommit_features(df, commit_ms):
     vy_c = V_y + A_y * t_commit
     vz_c = V_z + A_z * t_commit
 
-    # Post-commit deviation: ½·A·commit_s²  (algebraically = pfx * (commit_s/t_plate)²)
+    # Post-commit deviation. dev_x uses full horizontal Magnus acceleration.
+    # dev_z strips expected gravity: batters anticipate the drop from gravity,
+    # so only the spin-induced component (A_z + g) counts as unexpected deviation.
     dev_x = 0.5 * A_x * commit_s ** 2
-    dev_z = 0.5 * A_z * commit_s ** 2
+    dev_z = 0.5 * (A_z + GRAVITY_ACCEL_FTS2) * commit_s ** 2
 
     cols = {
         f"{p}dev_x":      dev_x,
@@ -155,6 +161,66 @@ def build_precommit(df, commit_ms_grid=COMMIT_MS_GRID):
     """Add pre/post-commit columns for every commit time in the grid."""
     for ms in commit_ms_grid:
         df = add_precommit_features(df, ms)
+    return df
+
+
+def add_empirical_baseline(df, commit_ms=COMMIT_MS_DEFAULT, k=EMPIRICAL_K):
+    """
+    Add empirically-derived expected plate location for each pitch.
+
+    For each pitch, the expected plate location is the mean plate_x/plate_z of
+    the K nearest pitches from the same pitcher in commit-time state space
+    (position + velocity at commit). This measures how surprising the actual
+    location was given the batter's best available read at commit — a curveball
+    that looks identical to a fastball at commit is surprising; one that already
+    shows obvious downward spin is not.
+
+    Features used: x_commit, z_commit, vx_commit, vz_commit (normalized globally).
+    Each pitch is excluded from its own neighborhood (leave-one-out).
+    Pitchers with fewer than k+1 valid pitches are skipped (emp_ cols stay NaN).
+
+    Adds columns (prefix pc{commit_ms}_emp_):
+      x_proj, z_proj  — expected plate location (ft)
+      dev_x, dev_z    — actual minus expected (ft); positive = further right/up
+    """
+    p = f"pc{commit_ms}_"
+    feat_cols = [f"{p}x_commit", f"{p}z_commit", f"{p}vx_commit", f"{p}vz_commit"]
+    out_xp = f"{p}emp_x_proj"
+    out_zp = f"{p}emp_z_proj"
+
+    df[out_xp] = np.nan
+    df[out_zp] = np.nan
+
+    required = feat_cols + ["plate_x", "plate_z", "pitcher_id"]
+    valid_mask = df[required].notna().all(axis=1)
+    d = df.loc[valid_mask]
+
+    # Global feature normalization so all 4 dimensions are weighted equally
+    mu = d[feat_cols].mean()
+    sigma = d[feat_cols].std().replace(0, 1.0)
+    X_all_norm = (d[feat_cols] - mu) / sigma
+
+    for pitcher_id, grp in d.groupby("pitcher_id"):
+        if len(grp) < k + 1:
+            continue
+
+        X = X_all_norm.loc[grp.index].values
+        nn = NearestNeighbors(n_neighbors=k + 1, algorithm="ball_tree")
+        nn.fit(X)
+        _, indices = nn.kneighbors(X)
+        # indices[:, 0] is self (distance = 0); use columns 1: for the K actual neighbors
+        neighbor_idx = indices[:, 1:]
+
+        plate_x_vals = grp["plate_x"].values
+        plate_z_vals = grp["plate_z"].values
+        exp_x = plate_x_vals[neighbor_idx].mean(axis=1)
+        exp_z = plate_z_vals[neighbor_idx].mean(axis=1)
+
+        df.loc[grp.index, out_xp] = exp_x
+        df.loc[grp.index, out_zp] = exp_z
+
+    df[f"{p}emp_dev_x"] = df["plate_x"] - df[out_xp]
+    df[f"{p}emp_dev_z"] = df["plate_z"] - df[out_zp]
     return df
 
 
@@ -214,6 +280,9 @@ if __name__ == "__main__":
 
     _validate(df, commit_ms=150)
 
+    print(f"Computing empirical baseline (K={EMPIRICAL_K}, commit={COMMIT_MS_DEFAULT}ms)…")
+    df = add_empirical_baseline(df)
+
     Path("data").mkdir(exist_ok=True)
     df.to_parquet(out, index=False)
     print(f"\nSaved {out}  ({out.stat().st_size / 1e6:.1f} MB)")
@@ -227,6 +296,19 @@ if __name__ == "__main__":
 
     ff = df[df["pitch_type"] == "FF"][[f"{p}dev_z"]].dropna()
     print(
-        f"\nFF dev_z mean (should be negative — ball drops below linear path): "
+        f"\nFF dev_z mean (should be positive — fastball rises above gravity-only path): "
         f"{ff[f'{p}dev_z'].mean():.4f} ft"
+    )
+
+    emp_coverage = df[f"{p}emp_dev_x"].notna().mean()
+    emp_dev = df[f"{p}emp_dev_x"].dropna()
+    print(
+        f"\nEmpirical baseline coverage: {emp_coverage:.1%} of rows"
+    )
+    print(
+        f"emp_dev_x  mean={emp_dev.mean():.4f}  std={emp_dev.std():.4f} ft"
+    )
+    emp_devz = df[f"{p}emp_dev_z"].dropna()
+    print(
+        f"emp_dev_z  mean={emp_devz.mean():.4f}  std={emp_devz.std():.4f} ft"
     )
