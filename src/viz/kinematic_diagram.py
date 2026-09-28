@@ -9,8 +9,6 @@ Saves: results/plots/case_studies/yamamoto_bernabel_annotation.png
        results/plots/case_studies/bradley_alonso_annotation.png
 """
 
-import os
-import re
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -37,49 +35,6 @@ _PITCH_TYPE_NAMES = {
     "FO": "Forkball (FO)",           "KN": "Knuckleball (KN)",
 }
 
-_PITCH_SHORT = {
-    "FF": "Four-seam FB", "SI": "Sinker",  "CH": "Changeup",
-    "SL": "Slider",       "CU": "Curveball", "FC": "Cutter",
-    "FS": "Splitter",     "KC": "Knuckle-curve", "ST": "Sweeper",
-    "SV": "Slurve",       "FO": "Forkball", "KN": "Knuckleball",
-}
-
-_DESC_TO_OUTCOME = {
-    "ball": "Ball", "blocked_ball": "Ball", "pitchout": "Ball",
-    "foul_pitchout": "Ball", "hit_by_pitch": "Ball",
-    "called_strike": "Called Strike",
-    "swinging_strike": "Swinging Strike",
-    "swinging_strike_blocked": "Swinging Strike",
-    "missed_bunt": "Swinging Strike",
-    "foul": "Foul", "foul_tip": "Foul", "foul_bunt": "Foul",
-    "bunt_foul_tip": "Foul",
-    "hit_into_play": "In Play",
-}
-
-_OUTCOME_COLOR = {
-    "Ball": GREEN,
-    "Called Strike": AMBER,
-    "Swinging Strike": RED,
-    "Foul": FG,
-    "In Play": FG,
-}
-
-
-# ── Data loader ───────────────────────────────────────────────────────────────
-
-def _get_secret(name):
-    val = os.environ.get(name)
-    if val:
-        return val
-    env_file = Path.home() / ".claude" / ".env"
-    if env_file.exists():
-        for line in env_file.read_text(encoding="utf-8", errors="ignore").splitlines():
-            m = re.match(rf"^\s*{re.escape(name)}\s*=\s*(.+)$", line)
-            if m:
-                return m.group(1).strip()
-    return None
-
-
 def load_pitch_metrics(
     game_pk, at_bat_number, pitch_number,
     commit_ms=150,
@@ -96,8 +51,6 @@ def load_pitch_metrics(
     Returns a flat dict suitable for passing to make_broadcast_annotation().
     prev_pitch is None when this is the first pitch of the at-bat.
     """
-    import mysql.connector
-
     pc = pd.read_parquet(precommit_path)
     cx = pd.read_parquet(causal_path)
 
@@ -107,45 +60,6 @@ def load_pitch_metrics(
     rc = cx.loc[(cx["game_pk"] == game_pk) &
                 (cx["at_bat_number"] == at_bat_number) &
                 (cx["pitch_number"] == pitch_number)].iloc[0]
-
-    conn = mysql.connector.connect(
-        host=_get_secret("BIOMECH_DB_HOST") or "10.200.200.107",
-        port=3306, user="readonlyuser",
-        password=_get_secret("BIOMECH_DB_PASS"), database="mlb_db",
-    )
-    cur = conn.cursor(dictionary=True)
-
-    # spin rate for the current pitch
-    cur.execute(
-        "SELECT release_spin_rate FROM pbp_raw "
-        "WHERE game_pk=%s AND at_bat_number=%s AND pitch_number=%s LIMIT 1",
-        (game_pk, at_bat_number, pitch_number),
-    )
-    spin_row = cur.fetchone() or {}
-
-    # previous pitch in this at-bat (None if first pitch)
-    prev_pitch = None
-    if pitch_number > 1:
-        cur.execute(
-            "SELECT pitch_type, pfx_x, pfx_z, pitch_outcome_explanation FROM pbp_raw "
-            "WHERE game_pk=%s AND at_bat_number=%s AND pitch_number=%s LIMIT 1",
-            (game_pk, at_bat_number, pitch_number - 1),
-        )
-        prev_row = cur.fetchone()
-        if prev_row:
-            pt_prev   = str(prev_row.get("pitch_type") or "")
-            raw_outcome = prev_row.get("pitch_outcome_explanation", "") or ""
-            outcome     = _DESC_TO_OUTCOME.get(raw_outcome, raw_outcome or "—")
-            pfx_x_raw = prev_row.get("pfx_x")
-            pfx_z_raw = prev_row.get("pfx_z")
-            prev_pitch = dict(
-                pitch_type = _PITCH_SHORT.get(pt_prev, pt_prev) or "—",
-                ivb_in     = float(pfx_z_raw) * 12 if pfx_z_raw is not None else None,
-                hb_in      = float(pfx_x_raw) * 12 if pfx_x_raw is not None else None,
-                outcome    = outcome,
-            )
-
-    conn.close()
 
     pt_code = str(rp.get("pitch_type", ""))
     balls   = int(rp["balls"])
@@ -165,7 +79,6 @@ def load_pitch_metrics(
         pitch_type       = _PITCH_TYPE_NAMES.get(pt_code, pt_code),
         # pitch profile
         release_speed    = float(rp["release_speed"]),
-        spin_rate        = float(spin_row.get("release_spin_rate") or 0),
         pfx_h_in         = float(rp["pfx_x"]) * 12,
         pfx_v_in         = float(rp["pfx_z"]) * 12,
         vaa              = float(rp["vaa"]),
@@ -185,8 +98,6 @@ def load_pitch_metrics(
         adjusted_disruption_tax = float(rc["adjusted_disruption_tax"]),
         decision_cost           = float(rc["decision_cost"]),
         distortion_share        = float(rc["distortion_share"]) * 100,
-        # previous pitch context
-        prev_pitch       = prev_pitch,
     )
 
 
@@ -274,7 +185,6 @@ def make_broadcast_annotation(
     # pitch profile
     y = section_title(y, "PITCH PROFILE", BLUE)
     row(y, "Velocity",       f"{data['release_speed']:.1f} mph",    AMBER); y -= rs
-    row(y, "Spin rate",      f"{data['spin_rate']:,.0f} rpm",        FG);   y -= rs
     row(y, "V-movement",     f"{data['pfx_v_in']:+.1f} in",         RED);  y -= rs
     row(y, "H-movement",     f"{data['pfx_h_in']:+.1f} in",         FG);   y -= rs
     row(y, "Vert. approach", f"{data['vaa']:.1f}°",                 FG);   y -= rs
@@ -291,27 +201,6 @@ def make_broadcast_annotation(
         row(y, "Timing", "n/a", GRAY)
     y -= rs
     row(y, "Miss distance", f"{data['miss_in']:.1f} in", RED); y -= rs
-    y -= pad
-
-    # previous pitch context
-    y = section_title(y, "PREVIOUS PITCH", GRAY)
-    pp = data.get("prev_pitch")
-    if pp is None:
-        ax_p.text(
-            (xs + xe) / 2, y, "First pitch of at-bat",
-            color=GRAY, fontsize=10, va="top", ha="center",
-            fontstyle="italic", transform=ax_p.transAxes,
-        )
-        y -= 0.042
-    else:
-        rs_pp = 0.044
-        row(y, "Pitch type", pp["pitch_type"],                           FG);    y -= rs_pp
-        ivb_str = f"{pp['ivb_in']:+.1f} in" if pp["ivb_in"] is not None else "—"
-        hb_str  = f"{pp['hb_in']:+.1f} in"  if pp["hb_in"]  is not None else "—"
-        row(y, "IVB",        ivb_str,                                    FG);    y -= rs_pp
-        row(y, "HB",         hb_str,                                     FG);    y -= rs_pp
-        oc      = pp["outcome"]
-        row(y, "Outcome",    oc, _OUTCOME_COLOR.get(oc, FG));                    y -= rs_pp
     y -= pad
 
     # disruption analysis
@@ -390,10 +279,10 @@ def make_broadcast_annotation(
 
 # ── Screenshot paths ──────────────────────────────────────────────────────────
 
-_YB_SCREENSHOT = "screenshots for kin diagrams/Screenshot 2026-06-22 100819.png"
-_LR_SCREENSHOT = "screenshots for kin diagrams/Screenshot 2026-06-23 102000.png"
-_HM_SCREENSHOT = "screenshots for kin diagrams/Screenshot 2026-06-23 104858.png"
-_SH_SCREENSHOT = "screenshots for kin diagrams/Screenshot 2026-06-23 105031.png"
+_YB_SCREENSHOT = "docs/screenshots/Screenshot 2026-06-22 100819.png"
+_LR_SCREENSHOT = "docs/screenshots/Screenshot 2026-06-23 102000.png"
+_HM_SCREENSHOT = "docs/screenshots/Screenshot 2026-06-23 104858.png"
+_SH_SCREENSHOT = "docs/screenshots/Screenshot 2026-06-23 105031.png"
 
 
 # ── Load metrics from data ────────────────────────────────────────────────────
