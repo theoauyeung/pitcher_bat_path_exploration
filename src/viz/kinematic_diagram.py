@@ -225,7 +225,7 @@ def make_broadcast_annotation(
 
     # distortion / selection bar
     hline(y + 0.006, BORDER); y -= 0.010
-    bx = xs - 0.04; bw = xe - xs + 0.06; bh = 0.028; by = y - 0.012
+    bx = xs - 0.04; bw = xe - xs + 0.06; bh = 0.028; by = y - 0.030
     dfrac    = max(data["distortion_share"] / 100, 0.0)
     sel_pct  = 100 - data["distortion_share"]
     dominant = dfrac >= 0.5
