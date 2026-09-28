@@ -211,8 +211,8 @@ def make_broadcast_annotation(
     img = mpimg.imread(screenshot_path)
     ih, iw = img.shape[:2]
 
-    img_frac   = 0.68
-    panel_frac = 0.32
+    img_frac   = 0.55
+    panel_frac = 0.45
     fig_h      = 9.0
     fig_w      = fig_h * (iw / ih) / img_frac
 
@@ -244,32 +244,32 @@ def make_broadcast_annotation(
         ax_p.plot([xs - 0.04, xe + 0.02], [y, y], color=color, lw=lw,
                   transform=ax_p.transAxes, zorder=2)
 
-    def row(y, label, val, vc=FG, ls=7.5, vs=8.5):
+    def row(y, label, val, vc=FG, ls=10, vs=11):
         ax_p.text(xs, y, label, color=GRAY, fontsize=ls, va="top",
                   transform=ax_p.transAxes)
         ax_p.text(xe, y, val, color=vc, fontsize=vs, va="top", ha="right",
                   fontweight="bold", transform=ax_p.transAxes)
 
     def section_title(y, title, tc=BLUE):
-        ax_p.text(xs, y, title, color=tc, fontsize=8.5, fontweight="bold",
+        ax_p.text(xs, y, title, color=tc, fontsize=11, fontweight="bold",
                   va="top", transform=ax_p.transAxes)
-        hline(y - 0.020, color=tc, lw=1.2)
-        return y - 0.038
+        hline(y - 0.022, color=tc, lw=1.2)
+        return y - 0.042
 
-    rs  = 0.037   # row spacing
-    pad = 0.010   # inter-section gap
+    rs  = 0.048   # row spacing
+    pad = 0.014   # inter-section gap
 
     # header
     y = 0.96
-    ax_p.text(xs, y, data["pitcher"], color=FG, fontsize=11, fontweight="bold",
-              va="top", transform=ax_p.transAxes); y -= 0.044
-    ax_p.text(xs, y, f"vs.  {data['batter']}", color=BLUE, fontsize=9.5,
-              va="top", transform=ax_p.transAxes); y -= 0.036
+    ax_p.text(xs, y, data["pitcher"], color=FG, fontsize=14, fontweight="bold",
+              va="top", transform=ax_p.transAxes); y -= 0.054
+    ax_p.text(xs, y, f"vs.  {data['batter']}", color=BLUE, fontsize=12,
+              va="top", transform=ax_p.transAxes); y -= 0.046
     ax_p.text(xs, y, f"{data['game_date']}   ·   {data['count']} count",
-              color=GRAY, fontsize=7.5, va="top", transform=ax_p.transAxes); y -= 0.032
-    ax_p.text(xs, y, data["pitch_type"], color=AMBER, fontsize=8.5, fontweight="bold",
-              va="top", transform=ax_p.transAxes); y -= 0.034
-    hline(y, BORDER); y -= 0.022
+              color=GRAY, fontsize=10, va="top", transform=ax_p.transAxes); y -= 0.040
+    ax_p.text(xs, y, data["pitch_type"], color=AMBER, fontsize=11, fontweight="bold",
+              va="top", transform=ax_p.transAxes); y -= 0.042
+    hline(y, BORDER); y -= 0.026
 
     # pitch profile
     y = section_title(y, "PITCH PROFILE", BLUE)
@@ -299,12 +299,12 @@ def make_broadcast_annotation(
     if pp is None:
         ax_p.text(
             (xs + xe) / 2, y, "First pitch of at-bat",
-            color=GRAY, fontsize=7.5, va="top", ha="center",
+            color=GRAY, fontsize=10, va="top", ha="center",
             fontstyle="italic", transform=ax_p.transAxes,
         )
-        y -= 0.033
+        y -= 0.042
     else:
-        rs_pp = 0.033
+        rs_pp = 0.044
         row(y, "Pitch type", pp["pitch_type"],                           FG);    y -= rs_pp
         ivb_str = f"{pp['ivb_in']:+.1f} in" if pp["ivb_in"] is not None else "—"
         hb_str  = f"{pp['hb_in']:+.1f} in"  if pp["hb_in"]  is not None else "—"
@@ -322,7 +322,7 @@ def make_broadcast_annotation(
     sz_top_in = data["sz_top"] * 12
     above_in  = proj_in - sz_top_in
 
-    rs_d = 0.034  # tighter spacing for this section to fit 5 rows
+    rs_d = 0.044  # tighter spacing for this section to fit 5 rows
     loc_note = f'+{above_in:.1f}" above zone' if above_in > 0 else "in zone"
     row(y, "Post-commit drop", f"−{dev_in:.1f} in", RED); y -= rs_d
     row(y, "Proj. → actual",
@@ -367,21 +367,21 @@ def make_broadcast_annotation(
     if dominant:
         lx = bx + bw * dfrac / 2
         ax_p.text(lx, by + bh / 2, f"DISTORTION  {data['distortion_share']:.0f}%",
-                  color="white", fontsize=7.5, ha="center", va="center",
+                  color="white", fontsize=9.5, ha="center", va="center",
                   fontweight="bold", transform=ax_p.transAxes, zorder=5)
         rx = bx + bw * dfrac + bw * (1 - dfrac) / 2
         ax_p.text(rx, by + bh / 2, f"SEL.  {sel_pct:.0f}%",
-                  color=FG, fontsize=7, ha="center", va="center",
+                  color=FG, fontsize=9, ha="center", va="center",
                   transform=ax_p.transAxes, zorder=5)
     else:
         rx = bx + bw * dfrac + bw * (1 - dfrac) / 2
         ax_p.text(rx, by + bh / 2, f"SELECTION  {sel_pct:.0f}%",
-                  color="#0d1117", fontsize=7.5, ha="center", va="center",
+                  color="#0d1117", fontsize=9.5, ha="center", va="center",
                   fontweight="bold", transform=ax_p.transAxes, zorder=5)
         if dfrac > 0.03:
             lx = bx + bw * dfrac / 2
             ax_p.text(lx, by + bh / 2, f"{data['distortion_share']:.0f}%",
-                      color=FG, fontsize=6.5, ha="center", va="center",
+                      color=FG, fontsize=8.5, ha="center", va="center",
                       transform=ax_p.transAxes, zorder=5)
 
     fig.subplots_adjust(left=0, right=1, bottom=0, top=1)
