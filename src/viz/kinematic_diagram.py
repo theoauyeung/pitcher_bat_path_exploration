@@ -170,7 +170,7 @@ def make_broadcast_annotation(
               color=GRAY, fontsize=11, va="top", transform=ax_p.transAxes); y -= 0.036
     ax_p.text(xs, y, data["pitch_type"], color=AMBER, fontsize=12, fontweight="bold",
               va="top", transform=ax_p.transAxes); y -= 0.038
-    hline(y, BORDER); y -= 0.022
+    y -= 0.010
 
     # pitch profile
     y = section_title(y, "PITCH PROFILE", BLUE)
