@@ -122,10 +122,12 @@ def make_broadcast_annotation(
     img = mpimg.imread(screenshot_path)
     ih, iw = img.shape[:2]
 
-    img_frac   = 0.55
-    panel_frac = 0.45
     fig_h      = 9.0
-    fig_w      = fig_h * (iw / ih) / img_frac
+    panel_w    = 4.5                        # fixed panel width in inches
+    img_w      = fig_h * (iw / ih)          # image width at fig_h height
+    fig_w      = img_w + panel_w
+    img_frac   = img_w / fig_w
+    panel_frac = panel_w / fig_w
 
     fig = plt.figure(figsize=(fig_w, fig_h), facecolor=BG)
 
