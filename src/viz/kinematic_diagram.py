@@ -224,8 +224,7 @@ def make_broadcast_annotation(
     y -= 0.005
 
     # distortion / selection bar
-    hline(y + 0.006, BORDER); y -= 0.010
-    bx = xs - 0.04; bw = xe - xs + 0.06; bh = 0.028; by = y - 0.030
+    bx = xs - 0.04; bw = xe - xs + 0.06; bh = 0.032; by = y - 0.030
     dfrac    = max(data["distortion_share"] / 100, 0.0)
     sel_pct  = 100 - data["distortion_share"]
     dominant = dfrac >= 0.5
@@ -248,21 +247,21 @@ def make_broadcast_annotation(
     if dominant:
         lx = bx + bw * dfrac / 2
         ax_p.text(lx, by + bh / 2, f"DISTORTION  {data['distortion_share']:.0f}%",
-                  color="white", fontsize=11, ha="center", va="center",
+                  color="white", fontsize=13, ha="center", va="center",
                   fontweight="bold", transform=ax_p.transAxes, zorder=5)
         rx = bx + bw * dfrac + bw * (1 - dfrac) / 2
         ax_p.text(rx, by + bh / 2, f"SEL.  {sel_pct:.0f}%",
-                  color=FG, fontsize=10.5, ha="center", va="center",
+                  color=FG, fontsize=12.5, ha="center", va="center",
                   transform=ax_p.transAxes, zorder=5)
     else:
         rx = bx + bw * dfrac + bw * (1 - dfrac) / 2
         ax_p.text(rx, by + bh / 2, f"SELECTION  {sel_pct:.0f}%",
-                  color="#0d1117", fontsize=11, ha="center", va="center",
+                  color="#0d1117", fontsize=13, ha="center", va="center",
                   fontweight="bold", transform=ax_p.transAxes, zorder=5)
         if dfrac > 0.03:
             lx = bx + bw * dfrac / 2
             ax_p.text(lx, by + bh / 2, f"{data['distortion_share']:.0f}%",
-                      color=FG, fontsize=10, ha="center", va="center",
+                      color=FG, fontsize=12, ha="center", va="center",
                       transform=ax_p.transAxes, zorder=5)
 
     fig.subplots_adjust(left=0, right=1, bottom=0, top=1)
