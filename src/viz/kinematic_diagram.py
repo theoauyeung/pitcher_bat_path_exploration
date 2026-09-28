@@ -105,7 +105,7 @@ def load_pitch_metrics(
 
 def make_broadcast_annotation(
     screenshot_path, data,
-    callout_xy, callout_xytext, callout_label,
+    callout_xy=None, callout_xytext=None, callout_label=None,
     callout_color=RED,
 ):
     """Two-panel broadcast card: game screenshot (left) + dark metrics panel (right).
@@ -133,16 +133,6 @@ def make_broadcast_annotation(
     ax_img = fig.add_axes([0, 0, img_frac, 1.0])
     ax_img.imshow(img, aspect="auto", extent=[0, iw, ih, 0])
     ax_img.set_xlim(0, iw); ax_img.set_ylim(ih, 0); ax_img.axis("off")
-
-    ax_img.text(
-        callout_xytext[0], callout_xytext[1],
-        callout_label,
-        color=callout_color, fontsize=9, fontweight="bold",
-        ha="center", va="bottom",
-        bbox=dict(boxstyle="round,pad=0.4", facecolor=BG,
-                  edgecolor=callout_color, alpha=0.92, linewidth=1.8),
-        zorder=10,
-    )
 
     # ── Metrics panel ─────────────────────────────────────────────────────────
     ax_p = fig.add_axes([img_frac, 0, panel_frac, 1.0])
@@ -279,7 +269,7 @@ def make_broadcast_annotation(
 
 # ── Screenshot paths ──────────────────────────────────────────────────────────
 
-_YB_SCREENSHOT = "docs/screenshots/Screenshot 2026-06-22 100819.png"
+_YB_SCREENSHOT = "docs/screenshots/Screenshot 2026-09-27 at 10.00.02 PM.png"
 _LR_SCREENSHOT = "docs/screenshots/Screenshot 2026-06-23 102000.png"
 _HM_SCREENSHOT = "docs/screenshots/Screenshot 2026-06-23 104858.png"
 _SH_SCREENSHOT = "docs/screenshots/Screenshot 2026-06-23 105031.png"
