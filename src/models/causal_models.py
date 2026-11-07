@@ -37,9 +37,16 @@ from xgboost import XGBClassifier, XGBRegressor
 # ── Column conventions ──────────────────────────────────────────────────────────
 
 ANGULAR_DEVS = ("vert_attack_angle_dev", "horz_attack_angle_dev", "swing_path_tilt_dev")
+ANGULAR_ABS  = ("vert_attack_angle", "horz_attack_angle", "swing_path_tilt")
+ANGULAR_INT  = ("intended_vert_attack_angle", "intended_horz_attack_angle", "intended_swing_path_tilt")
 
-# Feature order must be consistent between fit and predict.
+# BIP/foul models: deviations are the right signal (large deviation → less likely to make contact)
 OUTCOME_FEATURES = list(ANGULAR_DEVS) + ["plate_x", "plate_z", "balls", "strikes"]
+
+# EV/LA models: absolute swing angles give richer signal than deviations alone.
+# For the intended scenario, substitute intended_* angles; for realized, use actual angles.
+EV_LA_FEATURES = list(ANGULAR_ABS) + ["plate_x", "plate_z", "balls", "strikes"]
+
 ANGULAR_RESP = ("vert_attack_angle", "horz_attack_angle", "swing_path_tilt")
 
 def _pc(commit_ms, suffix):
@@ -129,22 +136,24 @@ def fit_outcome_models(df, commit_ms=150):
         d_foul[OUTCOME_FEATURES], d_foul["is_foul"], verbose=False
     )
 
-    # Exit velocity model — predicts launch_speed (mph) on BIP swings
+    # Exit velocity model — absolute swing angles give a richer signal than deviations;
+    # the counterfactual substitutes intended angles for the intended scenario.
     d_ev = df.loc[
         (df["is_bip"] == 1) & df["launch_speed"].notna(),
-        OUTCOME_FEATURES + ["launch_speed"],
+        EV_LA_FEATURES + ["launch_speed"],
     ].dropna()
     exit_velo_model = XGBRegressor(**_xgb_kw).fit(
-        d_ev[OUTCOME_FEATURES], d_ev["launch_speed"], verbose=False
+        d_ev[EV_LA_FEATURES], d_ev["launch_speed"], verbose=False
     )
 
-    # Launch angle model — predicts launch_angle (degrees) on BIP swings
+    # Launch angle model — same rationale: absolute angles span full range (-40 to 50°),
+    # deviations collapse to ±5° which regresses LA predictions toward the mean.
     d_la = df.loc[
         (df["is_bip"] == 1) & df["launch_angle"].notna(),
-        OUTCOME_FEATURES + ["launch_angle"],
+        EV_LA_FEATURES + ["launch_angle"],
     ].dropna()
     launch_angle_model = XGBRegressor(**_xgb_kw).fit(
-        d_la[OUTCOME_FEATURES], d_la["launch_angle"], verbose=False
+        d_la[EV_LA_FEATURES], d_la["launch_angle"], verbose=False
     )
 
     # EV/LA → run value model — smooth surface from (launch_speed, launch_angle) to delta_run_exp
@@ -189,8 +198,17 @@ def _xrv_from_shape(df, bip_model, foul_model, exit_velo_model, launch_angle_mod
     p_bip            = pd.Series(bip_model.predict_proba(feat)[:, 1],  index=df.index)
     p_foul_given_not = pd.Series(foul_model.predict_proba(feat)[:, 1], index=df.index)
 
-    ev_pred      = exit_velo_model.predict(feat)
-    la_pred      = launch_angle_model.predict(feat)
+    # EV/LA models use absolute angles. For the intended/spatial scenarios (zero_angular),
+    # substitute intended_* angles; for the realized scenario use the actual angles.
+    ev_la_score = df[["balls", "strikes"]].copy()
+    ev_la_score["plate_x"] = df[x_proj] if zero_spatial else df["plate_x"]
+    ev_la_score["plate_z"] = df[z_proj] if zero_spatial else df["plate_z"]
+    for abs_col, int_col in zip(ANGULAR_ABS, ANGULAR_INT):
+        ev_la_score[abs_col] = df[int_col] if zero_angular else df[abs_col]
+    ev_la_feat = ev_la_score[EV_LA_FEATURES]
+
+    ev_pred      = exit_velo_model.predict(ev_la_feat)
+    la_pred      = launch_angle_model.predict(ev_la_feat)
     ev_la_feat   = np.column_stack([ev_pred, la_pred])
     e_rv_bip     = pd.Series(ev_la_rv_model.predict(ev_la_feat), index=df.index)
 
