@@ -103,7 +103,8 @@ def _prep(df, n_subsample=None, seed=345):
     # The indicator absorbs the average shift for missing-timing rows; the timing
     # coefficient is then identified only from rows where it was observed.
     d["offset_y_ms_missing"] = d["offset_y_ms"].isna().astype(float)
-    timing_mean = float(d["offset_y_ms"].mean())  # mean of observed
+    _raw_mean = d["offset_y_ms"].mean()
+    timing_mean = float(_raw_mean) if pd.notna(_raw_mean) else 0.0  # 0 when column fully absent
     d["offset_y_ms"] = d["offset_y_ms"].fillna(timing_mean)
 
     if n_subsample is not None and n_subsample < len(d):
