@@ -114,7 +114,6 @@ def foul_rv_from_count_values(path="results/count_values.csv"):
 
 def run(
     data_path="data/swings_precommit.parquet",
-    lw_path="results/linear_weights.csv",
     count_values_path="results/count_values.csv",
     commit_ms=150,
     n_subsample=75_000,
