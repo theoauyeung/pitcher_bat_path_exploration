@@ -37,7 +37,7 @@ ALL_RESPONSES = ANGULAR + EFFORT
 
 # ── Model formulas ─────────────────────────────────────────────────────────────
 
-def _angular_formula(resp):
+def _angular_formula(resp, has_timing=True):
     """Quadratic smooth on plate_z + timing for the three angular mediators.
 
     Batter RE is intercept + strikes only. Including plate_x_bat/plate_z in the
@@ -46,10 +46,11 @@ def _angular_formula(resp):
     are captured by the fixed effects; the random slope captures per-batter count
     adjustment, which is the intention signal.
     """
+    timing = " + scale(offset_y_ms) + offset_y_ms_missing" if has_timing else ""
     return (
         f"{resp} ~ scale(balls) + scale(strikes)"
         " + scale(plate_x_bat) + scale(plate_z) + scale(plate_z_sq)"
-        " + scale(offset_y_ms) + offset_y_ms_missing"
+        f"{timing}"
         " + pitcher_throws_L + pitcher_throws_L:scale(plate_x_bat)"
         " + (1 + scale(strikes) | batter_id)"
         " + (1 | pitcher_id)"
@@ -136,7 +137,8 @@ def fit(df, n_subsample=None, draws=1000, tune=1000, chains=4,
 
     models, idata = {}, {}
     for resp in responses:
-        formula = _angular_formula(resp) if resp in ANGULAR else _effort_formula(resp)
+        has_timing = bool(d["offset_y_ms_missing"].mean() < 1.0)
+        formula = _angular_formula(resp, has_timing=has_timing) if resp in ANGULAR else _effort_formula(resp)
 
         # Bambi 0.18 lacks skewnormal; gaussian used for all responses.
         model = bmb.Model(formula, d, family="gaussian")
