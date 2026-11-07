@@ -28,12 +28,26 @@ WHIFF_DESC = {
 BIP_DESC = {"hit_into_play", "hit_into_play_no_out", "hit_into_play_score"}
 
 RENAME_MAP = {
-    "batter":        "batter_id",
-    "pitcher":       "pitcher_id",
-    "player_name":   "pitcher_full_name",   # Statcast player_name = pitcher
-    "stand":         "batter_stand",
-    "p_throws":      "pitcher_throws",
-    "type":          "pitch_outcome",        # B=ball, S=strike, X=in-play
+    # sabRmetrics column names → pipeline convention
+    "game_id":          "game_pk",
+    "year":             "game_year",
+    "bat_side":         "batter_stand",
+    "pitch_hand":       "pitcher_throws",
+    "extension":        "release_extension",
+    "strike_zone_top":  "sz_top",
+    "strike_zone_bottom": "sz_bot",
+    "attack_angle":     "vert_attack_angle",
+    "attack_direction": "horz_attack_angle",
+    "miss_distance":    "ball_bat_miss",
+    "intercept_ball_minus_batter_pos_x_inches": "offset_x_in",
+    "intercept_ball_minus_batter_pos_y_inches": "offset_z_in",
+    "type":             "pitch_outcome",     # B=ball, S=strike, X=in-play
+    # Legacy Statcast bulk-download names (kept for backward compat)
+    "batter":           "batter_id",
+    "pitcher":          "pitcher_id",
+    "player_name":      "pitcher_full_name",
+    "stand":            "batter_stand",
+    "p_throws":         "pitcher_throws",
 }
 
 
@@ -66,26 +80,34 @@ def transform(df: pd.DataFrame, resolve_batter_names: bool = True) -> pd.DataFra
     # ── 1. Column renames ─────────────────────────────────────────────────────
     df = df.rename(columns={k: v for k, v in RENAME_MAP.items() if k in df.columns})
 
-    # batter_full_name: Statcast doesn't include batter name in bulk pull.
-    if "batter_full_name" not in df.columns:
+    # sabRmetrics provides batter_name directly; rename it.
+    if "batter_name" in df.columns and "batter_full_name" not in df.columns:
+        df = df.rename(columns={"batter_name": "batter_full_name"})
+
+    # pitcher_full_name: sabRmetrics has no pitcher name column; look it up.
+    if "pitcher_full_name" not in df.columns:
         if resolve_batter_names:
             try:
                 from pybaseball import playerid_reverse_lookup
-                batter_ids = df["batter_id"].dropna().unique().tolist()
-                lookup = playerid_reverse_lookup(batter_ids, key_type="mlbam")
-                lookup["batter_full_name"] = lookup["name_first"] + " " + lookup["name_last"]
-                lookup = lookup.rename(columns={"key_mlbam": "batter_id"})[
-                    ["batter_id", "batter_full_name"]
+                pitcher_ids = df["pitcher_id"].dropna().unique().tolist()
+                lookup = playerid_reverse_lookup(pitcher_ids, key_type="mlbam")
+                lookup["pitcher_full_name"] = lookup["name_first"] + " " + lookup["name_last"]
+                lookup = lookup.rename(columns={"key_mlbam": "pitcher_id"})[
+                    ["pitcher_id", "pitcher_full_name"]
                 ]
-                df = df.merge(lookup, on="batter_id", how="left")
+                df = df.merge(lookup, on="pitcher_id", how="left")
             except Exception as e:
                 print(
-                    f"WARNING: could not resolve batter names ({e})."
-                    " Setting batter_full_name = batter_id."
+                    f"WARNING: could not resolve pitcher names ({e})."
+                    " Setting pitcher_full_name = pitcher_id."
                 )
-                df["batter_full_name"] = df["batter_id"].astype(str)
+                df["pitcher_full_name"] = df["pitcher_id"].astype(str)
         else:
-            df["batter_full_name"] = df["batter_id"].astype(str)
+            df["pitcher_full_name"] = df["pitcher_id"].astype(str)
+
+    # batter_full_name fallback if still missing
+    if "batter_full_name" not in df.columns:
+        df["batter_full_name"] = df["batter_id"].astype(str)
 
     # ── 2. Derive outcome flags ───────────────────────────────────────────────
     df["is_swing"]   = df["description"].isin(SWING_DESC).astype(int)

@@ -73,8 +73,8 @@ print(lw_raw)
 # Count value = mean remaining run expectancy from this count forward within a PA.
 count_vals <- raw %>%
   filter(!is.na(delta_run_exp), !is.na(balls), !is.na(strikes)) %>%
-  arrange(game_pk, at_bat_number, pitch_number) %>%
-  group_by(game_pk, at_bat_number) %>%
+  arrange(game_id, at_bat_number, pitch_number) %>%
+  group_by(game_id, at_bat_number) %>%
   mutate(remaining_rv = rev(cumsum(rev(delta_run_exp)))) %>%
   ungroup() %>%
   group_by(balls, strikes) %>%
