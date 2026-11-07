@@ -5,12 +5,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Running the pipeline
 
 ```bash
-# Always use the project venv, not system Python
-.venv/bin/python src/data/pull_data.py          # data/swings_2023_2025.csv
+# Step 1 — R data pull (requires R ≥ 4.0, sabRmetrics, tidyverse)
+# Pulls 2023-2025 Statcast, writes data/savant_raw.csv + results/linear_weights.csv + results/count_values.csv
+Rscript src/data/pull_savant.R
+
+# Step 2 — Python swing processing
+.venv/bin/python src/data/process_savant.py     # data/swings_2023_2025.csv
+
+# Step 3 — Pre/post-commit split (unchanged)
 .venv/bin/python src/data/precommit_split.py    # data/swings_precommit.parquet
-.venv/bin/python src/data/run_values.py         # results/linear_weights.csv, count_values.csv
+
+# Step 4 — Full causal pipeline
 .venv/bin/python src/models/run_pipeline.py     # results/xrv_causal.parquet + leaderboards
 ```
+
+`pull_data.py` and `run_values.py` have been deleted — do not use them.
 
 Scripts must run in order. `src/models/run_pipeline.py` is the entry point for Phase A + Phase B; it imports `intention_model` and `causal_models` directly from `src/models/`.
 
@@ -40,9 +49,13 @@ Key column names to know:
 
 ## What each script does
 
-### `src/data/pull_data.py` — Data pull
+### `src/data/pull_savant.R` — R data pull
 
-Pulls all pitches (not just swings) so sequence lag features (`prev_pitch_type`, `velo_delta`, location deltas) capture what the batter saw on the previous pitch, including takes. After lags are computed, non-swings are dropped.
+Pulls 2023–2025 Statcast data via sabRmetrics, computes RE24 run expectancy tables, and writes `data/savant_raw.csv`, `results/linear_weights.csv`, and `results/count_values.csv`. Requires R ≥ 4.0 with the `sabRmetrics` and `tidyverse` packages.
+
+### `src/data/process_savant.py` — Python swing processing
+
+Reads `data/savant_raw.csv`, computes sequence lag features (`prev_pitch_type`, `velo_delta`, location deltas) using the full pitch dataset (including takes), then drops non-swings.
 
 Output: `data/swings_2023_2025.csv` (~760k swing rows). Bat-tracking columns will be NaN for 2023 pitches before mid-season rollout.
 
@@ -53,10 +66,6 @@ Reconstructs each pitch's full flight path from release parameters, then compute
 Default commit time is 150 ms. This is deliberately conservative (understates distortion), so the robustness grid over 125/150/175/200 ms treats commit-time uncertainty as a sensitivity check rather than the main analysis.
 
 Output: `data/swings_precommit.parquet` with `pc{ms}_dev_x/z`, `pc{ms}_x_proj/z_proj`, and 9-parameter trajectory columns for each commit time in the grid.
-
-### `src/data/run_values.py` — RE24 and linear weights
-
-Computes run expectancy tables and linear weights from the full pitch dataset. Must run before `src/models/run_pipeline.py`.
 
 ### `src/models/intention_model.py` — Phase A: batter intended swing (imported by `run_pipeline.py`)
 
@@ -72,12 +81,14 @@ Two sets of models:
 
 **Mediator models** (one per angular deviation axis): estimate how much of each swing deviation is mechanically caused by post-commit movement. The treatment coefficients give the causal leverage — degrees of swing deviation per foot of late movement.
 
-**Outcome models** (three channels): price swing deviation in run value using XGBoost gradient-boosted trees. Trees prevent the linear extrapolation artifacts that logistic/OLS models produce at extreme plate locations (e.g. pitches 9" above the zone) or extreme angular deviations.
+**Outcome models** (five models): price swing deviation in run value using XGBoost gradient-boosted trees. Trees prevent the linear extrapolation artifacts that logistic/OLS models produce at extreme plate locations (e.g. pitches 9" above the zone) or extreme angular deviations.
 - `bip_model` — P(ball in play)
 - `foul_model` — P(foul | not BIP), fit only on non-BIP swings. Kept separate from whiff because at two strikes a foul keeps the PA alive; a whiff ends it.
-- `xwoba_model` — E[xwOBA | BIP]
+- `exit_velo_model` — E[launch_speed | BIP]
+- `launch_angle_model` — E[launch_angle | BIP]
+- `ev_la_rv_model` — E[delta_run_exp | BIP] as a function of predicted EV and LA; converts EV/LA predictions to run value
 
-Feature set for all three: `OUTCOME_FEATURES = ANGULAR_DEVS + ["plate_x", "plate_z", "balls", "strikes"]`. Column order matters — always slice with `df[OUTCOME_FEATURES]` before predicting.
+Feature set for outcome models: `OUTCOME_FEATURES = ANGULAR_DEVS + ["plate_x", "plate_z", "balls", "strikes"]`. Column order matters — always slice with `df[OUTCOME_FEATURES]` before predicting.
 
 Also fits **miss models** (statsmodels OLS) to measure physical bat-to-ball miss on whiffs and contacts, and computes **decision cost** — the opportunity cost of swinging vs. taking at the projected plate location. **`adjusted_disruption_tax`** combines these: `disruption_tax − max(0, decision_cost)`, giving total batter burden vs. the optimal available action.
 
@@ -130,9 +141,9 @@ Development utility that polls for file changes and auto-commits to git after a 
 
 | File | Contents |
 |------|----------|
-| `results/xrv_causal.parquet` | Per-swing: `disruption_tax`, `adjusted_disruption_tax`, `distortion_tax`, `selection_tax`, `spatial_distortion_tax`, `distortion_share`, `miss_distortion_tax`, `decision_cost` |
-| `results/distortion_pitcher.csv` | Pitcher-level leaderboard (≥50 swings) |
-| `results/distortion_batter.csv` | Batter-level leaderboard (≥50 swings) |
+| `results/xrv_causal.parquet` | Per-swing: `disruption_tax`, `adjusted_disruption_tax`, `distortion_tax`, `selection_tax`, `spatial_distortion_tax`, `distortion_share`, `miss_distortion_tax`, `decision_cost`, `ev_realized`, `la_realized`, `ev_intended`, `la_intended`, `ev_suppression` |
+| `results/distortion_pitcher.csv` | Pitcher-level leaderboard (≥50 swings); includes `mean_ev_suppression` and `mean_la_change` |
+| `results/distortion_batter.csv` | Batter-level leaderboard (≥50 swings); includes `mean_ev_suppression` and `mean_la_change` |
 | `results/plots/leaderboards/` | Distortion tax leaderboard tables (PNG) |
 | `results/plots/validation/` | Reliability, xwOBA relationship, outcome rates (PNG) |
 | `results/plots/diagnostics/` | Axis fingerprint, count/fixed effects, physical drivers (PNG) |

@@ -68,37 +68,6 @@ def competitive_swings(df):
 
 # ── Run value inputs ────────────────────────────────────────────────────────────
 
-def add_xwoba(df, lw_path="results/linear_weights.csv"):
-    """Add xwoba column: realized linear-weight run value per batted ball.
-
-    Defined only for balls in play (is_bip == 1); fouls and whiffs stay NaN and
-    are naturally excluded from fit_outcome_models' xwoba regression via dropna().
-
-    Hit outcomes are mutually exclusive and tested in descending order of value
-    to handle any edge-case double-coding in the source data.
-    """
-    lw = pd.read_csv(lw_path).set_index("outcome_type")["lw"]
-
-    out = df.copy()
-    xwoba = pd.Series(np.nan, index=df.index)
-
-    bip = df["is_bip"] == 1
-    xwoba.loc[bip & (df["is_home_run"] == 1)] = lw["home_run"]
-    xwoba.loc[bip & (df["is_triple"]   == 1) & (df["is_home_run"] == 0)] = lw["triple"]
-    xwoba.loc[bip & (df["is_double"]   == 1) & (df["is_triple"]   == 0)
-                                             & (df["is_home_run"] == 0)] = lw["double"]
-    xwoba.loc[bip & (df["is_single"]   == 1) & (df["is_double"]   == 0)
-                                             & (df["is_triple"]   == 0)
-                                             & (df["is_home_run"] == 0)] = lw["single"]
-    # remaining BIP that aren't hits: outs in play
-    out_mask = bip & (df["is_home_run"] == 0) & (df["is_triple"] == 0) & \
-               (df["is_double"] == 0) & (df["is_single"] == 0)
-    xwoba.loc[out_mask] = lw["out_in_play"]
-
-    out["xwoba"] = xwoba
-    return out
-
-
 def whiff_rv_from_count_values(path="results/count_values.csv"):
     """Build whiff run-value table from count-state expected run values.
 
@@ -164,7 +133,6 @@ def run(
     # ── 1. Load and prep ──────────────────────────────────────────────────────────
     df = load_swings(data_path)
     swings = competitive_swings(df)
-    swings = add_xwoba(swings, lw_path)
     print(f"Competitive swings: {len(swings):,}")
 
     # ── 2. Phase A: intended swing model ─────────────────────────────────────────
@@ -216,7 +184,8 @@ def run(
 
     # ── 4. Phase B: outcome models ────────────────────────────────────────────────
     print("\nFitting outcome models...")
-    bip_model, foul_model, xwoba_model, _ = _B.fit_outcome_models(swings, commit_ms=commit_ms)
+    bip_model, foul_model, exit_velo_model, launch_angle_model, ev_la_rv_model, _ = \
+        _B.fit_outcome_models(swings, commit_ms=commit_ms)
     whiff_rv = whiff_rv_from_count_values(count_values_path)
     foul_rv  = foul_rv_from_count_values(count_values_path)
     print("Outcome models done.")
@@ -233,7 +202,9 @@ def run(
         swings,
         bip_model,
         foul_model,
-        xwoba_model,
+        exit_velo_model,
+        launch_angle_model,
+        ev_la_rv_model,
         whiff_rv,
         foul_rv,
         mediator_models,
@@ -263,7 +234,8 @@ def run(
 
     # ── 6. Analytical indirect effect ────────────────────────────────────────────
     ie = _B.indirect_effect(
-        mediator_models, bip_model, foul_model, xwoba_model,
+        mediator_models, bip_model, foul_model,
+        exit_velo_model, launch_angle_model, ev_la_rv_model,
         whiff_rv, foul_rv, swings, commit_ms=commit_ms,
     )
     print("\nIndirect effects (post-commit movement -> xRV via swing distortion):")
@@ -279,11 +251,15 @@ def run(
                "balls", "strikes", "pitch_type"]
     tax_cols = ["disruption_tax", "adjusted_disruption_tax", "spatial_distortion_tax",
                 "distortion_tax", "selection_tax", "distortion_share",
-                "miss_distortion_tax", "decision_cost"]
+                "miss_distortion_tax", "decision_cost",
+                "ev_realized", "la_realized", "ev_intended", "la_intended", "ev_suppression"]
     save_cols = [c for c in id_cols + tax_cols if c in results.columns]
 
     results[save_cols].to_parquet("results/xrv_causal.parquet", index=False)
     results[save_cols].to_csv("results/xrv_causal.csv", index=False)
+
+    # Pre-compute la_change for the groupby (BIP rows only; NaN on non-BIP)
+    results["la_change"] = results["la_realized"] - results["la_intended"]
 
     for group_col, out_path in [("pitcher_id", "results/distortion_pitcher.csv"),
                                  ("batter_id",  "results/distortion_batter.csv")]:
@@ -300,6 +276,8 @@ def run(
                 mean_adjusted_disruption_tax=("adjusted_disruption_tax", "mean"),
                 mean_miss_distortion_tax=("miss_distortion_tax", "mean"),
                 mean_decision_cost=("decision_cost", "mean"),
+                mean_ev_suppression=("ev_suppression", "mean"),
+                mean_la_change=("la_change", "mean"),
             )
             .query("n_swings >= 50")
             .sort_values("mean_distortion_tax")
@@ -311,7 +289,9 @@ def run(
             "mediator_models":    mediator_models,
             "bip_model":          bip_model,
             "foul_model":         foul_model,
-            "xwoba_model":        xwoba_model,
+            "exit_velo_model":    exit_velo_model,
+            "launch_angle_model": launch_angle_model,
+            "ev_la_rv_model":     ev_la_rv_model,
             "whiff_rv":           whiff_rv,
             "foul_rv":            foul_rv,
             "whiff_miss_model":   whiff_miss_model,
@@ -333,7 +313,9 @@ def run(
         "mediator_models":    mediator_models,
         "bip_model":          bip_model,
         "foul_model":         foul_model,
-        "xwoba_model":        xwoba_model,
+        "exit_velo_model":    exit_velo_model,
+        "launch_angle_model": launch_angle_model,
+        "ev_la_rv_model":     ev_la_rv_model,
         "whiff_rv":           whiff_rv,
         "foul_rv":            foul_rv,
         "whiff_miss_model":   whiff_miss_model,
