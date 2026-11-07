@@ -354,11 +354,15 @@ def indirect_effect(mediator_models, bip_model, foul_model, exit_velo_model,
 
 def negative_control_check(df_with_tax, dev_total_col="pc150_dev_total",
                             pitch_type_col="pitch_type", threshold_in=1.0):
-    """Negative control: near-straight four-seamers should show ~zero disruption tax.
+    """Negative control: near-straight four-seamers should show ~zero distortion tax.
 
     Filters to FF with post-commit deviation < threshold_in inches (converted to ft).
-    A nonzero mean disruption_tax on this subset means the pre/post split is leaking
-    selection into the distortion regressor.
+    A nonzero mean distortion_tax on this subset means the pre/post split is leaking
+    movement signal into the distortion regressor.
+
+    Note: disruption_tax will not be near zero here — it includes selection_tax, which
+    captures the batter's swing-decision cost and is independent of post-commit movement.
+    Only distortion_tax (the movement-caused component) should be near zero.
 
     Prints summary and returns the filtered subset.
     """
@@ -366,13 +370,14 @@ def negative_control_check(df_with_tax, dev_total_col="pc150_dev_total",
     ff_straight = df_with_tax[
         (df_with_tax[pitch_type_col] == "FF") &
         (df_with_tax[dev_total_col] < threshold_ft) &
-        df_with_tax["disruption_tax"].notna()
+        df_with_tax["distortion_tax"].notna()
     ]
     n = len(ff_straight)
-    mean_tax = ff_straight["disruption_tax"].mean()
+    mean_dist = ff_straight["distortion_tax"].mean()
+    mean_disrup = ff_straight["disruption_tax"].mean()
     print(f"Negative control (FF, dev_total < {threshold_in}\"):")
-    print(f"  n={n:,}  mean disruption_tax={mean_tax:.4f} xRV/swing")
-    print(f"  {'PASS' if abs(mean_tax) < 0.005 else 'WARN — possible selection leak'}")
+    print(f"  n={n:,}  mean distortion_tax={mean_dist:.4f}  mean disruption_tax={mean_disrup:.4f} xRV/swing")
+    print(f"  {'PASS' if abs(mean_dist) < 0.005 else 'WARN — distortion leaking into near-zero movement pitches'}")
     return ff_straight
 
 

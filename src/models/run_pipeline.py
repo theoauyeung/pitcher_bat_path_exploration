@@ -278,7 +278,7 @@ def run(
                 mean_ev_suppression=("ev_suppression", "mean"),
                 mean_la_change=("la_change", "mean"),
             )
-            .query("n_swings >= 50")
+            .query("n_swings >= 500")
             .sort_values("mean_distortion_tax")
         )
         agg.to_csv(out_path)
