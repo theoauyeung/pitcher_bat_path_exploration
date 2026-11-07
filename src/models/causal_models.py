@@ -95,14 +95,15 @@ def fit_mediator_models(df, commit_ms=150, empirical=True):
 # ── 2. Outcome models ───────────────────────────────────────────────────────────
 
 def fit_outcome_models(df, commit_ms=150):
-    """Fit all outcome components. Returns (bip_model, foul_model, xwoba_model, whiff_rv_table).
+    """Fit all outcome components. Returns 6-tuple:
+    (bip_model, foul_model, exit_velo_model, launch_angle_model, ev_la_rv_model, whiff_rv).
 
-    XGBoost gradient-boosted trees replace the previous logistic/OLS models. Trees handle
-    non-linear plate-location effects and don't extrapolate linearly beyond the training
-    distribution — sparse regions (e.g. pitches 9" above zone) stay near their empirical
-    base rate rather than following a logistic slope into unrealistic territory.
+    BIP channel is now a two-stage chain:
+      swing features → (exit_velo_model, launch_angle_model) → ev_la_rv_model → run value
+    This makes the causal chain explicit: post-commit movement → swing deviation →
+    exit velocity / launch angle → run value.
 
-    Spatial disruption is priced via counterfactual (zero_spatial=True substitutes x_proj/z_proj).
+    Whiff and foul channels are unchanged.
     """
     _xgb_kw = dict(
         n_estimators=400, max_depth=5, learning_rate=0.05,
@@ -114,6 +115,7 @@ def fit_outcome_models(df, commit_ms=150):
     if "is_foul" not in d.columns:
         d["is_foul"] = ((d["is_contact"] == 1) & (d["is_bip"] != 1)).astype(int)
 
+    # BIP / foul probability models — unchanged
     d_bip = d[OUTCOME_FEATURES + ["is_bip"]].dropna()
     bip_model = XGBClassifier(**_xgb_kw).fit(
         d_bip[OUTCOME_FEATURES], d_bip["is_bip"], verbose=False
@@ -124,9 +126,31 @@ def fit_outcome_models(df, commit_ms=150):
         d_foul[OUTCOME_FEATURES], d_foul["is_foul"], verbose=False
     )
 
-    d_xwoba = df.loc[df["is_bip"] == 1, OUTCOME_FEATURES + ["xwoba"]].dropna()
-    xwoba_model = XGBRegressor(**_xgb_kw).fit(
-        d_xwoba[OUTCOME_FEATURES], d_xwoba["xwoba"], verbose=False
+    # Exit velocity model — predicts launch_speed (mph) on BIP swings
+    d_ev = df.loc[
+        (df["is_bip"] == 1) & df["launch_speed"].notna(),
+        OUTCOME_FEATURES + ["launch_speed"],
+    ].dropna()
+    exit_velo_model = XGBRegressor(**_xgb_kw).fit(
+        d_ev[OUTCOME_FEATURES], d_ev["launch_speed"], verbose=False
+    )
+
+    # Launch angle model — predicts launch_angle (degrees) on BIP swings
+    d_la = df.loc[
+        (df["is_bip"] == 1) & df["launch_angle"].notna(),
+        OUTCOME_FEATURES + ["launch_angle"],
+    ].dropna()
+    launch_angle_model = XGBRegressor(**_xgb_kw).fit(
+        d_la[OUTCOME_FEATURES], d_la["launch_angle"], verbose=False
+    )
+
+    # EV/LA → run value model — smooth surface from (launch_speed, launch_angle) to delta_run_exp
+    d_rv = df.loc[
+        (df["is_bip"] == 1) & df["launch_speed"].notna() & df["delta_run_exp"].notna(),
+        ["launch_speed", "launch_angle", "delta_run_exp"],
+    ].dropna()
+    ev_la_rv_model = XGBRegressor(**_xgb_kw).fit(
+        d_rv[["launch_speed", "launch_angle"]], d_rv["delta_run_exp"], verbose=False
     )
 
     whiffs = df[(df["is_swing"] == 1) & (df["is_whiff"] == 1) &
@@ -134,37 +158,24 @@ def fit_outcome_models(df, commit_ms=150):
     whiff_rv = whiffs.groupby(["balls", "strikes"])["delta_run_exp"].mean().to_dict()
     whiff_rv["default"] = whiffs["delta_run_exp"].mean()
 
-    return bip_model, foul_model, xwoba_model, whiff_rv
+    return bip_model, foul_model, exit_velo_model, launch_angle_model, ev_la_rv_model, whiff_rv
 
 
 # ── 3. Disruption tax ───────────────────────────────────────────────────────────
 
-def _xrv_from_shape(df, bip_model, foul_model, xwoba_model, whiff_rv, foul_rv,
+def _xrv_from_shape(df, bip_model, foul_model, exit_velo_model, launch_angle_model,
+                    ev_la_rv_model, whiff_rv, foul_rv,
                     commit_ms=150, zero_angular=False, zero_spatial=False, empirical=True):
     """Predict per-swing xRV for one of three counterfactual scenarios.
 
-    zero_angular=False, zero_spatial=False → realized xRV (actual everything)
-    zero_angular=True,  zero_spatial=True  → intended xRV:
-        ball at projected location (pc_dev=0), perfect swing (angular_dev=0).
-        This is the 'what if the ball stayed where the batter expected it to?' baseline.
-    zero_angular=True,  zero_spatial=False → spatial-only xRV:
-        actual post-commit movement, perfect swing angles.
-        Isolates the cost of spatial displacement alone.
-
-    Three-channel formula:
-      P(foul) = (1 − P(BIP)) × P(foul | not BIP)
-      P(whiff) = (1 − P(BIP)) × (1 − P(foul | not BIP))
-      xRV = P(BIP)×E[xwOBA|BIP] + P(foul)×foul_rv[count] + P(whiff)×whiff_rv[count]
+    BIP channel: swing features → predicted EV/LA → ev_la_rv_model → E[run value | BIP].
+    Whiff and foul channels unchanged.
     """
     prefix = f"pc{commit_ms}"
     emp    = "emp_" if empirical else ""
     x_proj = f"{prefix}_{emp}x_proj"
     z_proj = f"{prefix}_{emp}z_proj"
 
-    # Outcome models use plate_x / plate_z. When zero_spatial=True, substitute the
-    # pre-commit projected location — Option B counterfactual ("ball stayed where
-    # the batter expected it"). This correctly prices spatial disruption through the
-    # same plate-location regression used at training time.
     score = df[["balls", "strikes"]].copy()
     score["plate_x"] = df[x_proj] if zero_spatial else df["plate_x"]
     score["plate_z"] = df[z_proj] if zero_spatial else df["plate_z"]
@@ -174,7 +185,11 @@ def _xrv_from_shape(df, bip_model, foul_model, xwoba_model, whiff_rv, foul_rv,
     feat = score[OUTCOME_FEATURES]
     p_bip            = pd.Series(bip_model.predict_proba(feat)[:, 1],  index=df.index)
     p_foul_given_not = pd.Series(foul_model.predict_proba(feat)[:, 1], index=df.index)
-    e_xwoba          = pd.Series(xwoba_model.predict(feat),             index=df.index)
+
+    ev_pred      = exit_velo_model.predict(feat)
+    la_pred      = launch_angle_model.predict(feat)
+    ev_la_feat   = np.column_stack([ev_pred, la_pred])
+    e_rv_bip     = pd.Series(ev_la_rv_model.predict(ev_la_feat), index=df.index)
 
     def _count_lookup(rv_table):
         return df.apply(
@@ -189,42 +204,24 @@ def _xrv_from_shape(df, bip_model, foul_model, xwoba_model, whiff_rv, foul_rv,
     p_foul  = (1 - p_bip) * p_foul_given_not
     p_whiff = (1 - p_bip) * (1 - p_foul_given_not)
 
-    return p_bip * e_xwoba + p_foul * foul_vals + p_whiff * whiff_vals
+    return p_bip * e_rv_bip + p_foul * foul_vals + p_whiff * whiff_vals
 
 
-def disruption_tax_split(df, bip_model, foul_model, xwoba_model, whiff_rv, foul_rv,
+def disruption_tax_split(df, bip_model, foul_model, exit_velo_model, launch_angle_model,
+                         ev_la_rv_model, whiff_rv, foul_rv,
                          mediator_models, commit_ms=150, empirical=True):
     """Full disruption tax with two-channel distortion/selection decomposition.
-
-    Three xRV scenarios:
-      xrv_realized  — actual angular deviations + actual post-commit movement
-      xrv_spatial   — zero angular deviations + actual post-commit movement
-                       (perfect swing, ball at actual plate location)
-      xrv_intended  — zero angular deviations + zero post-commit movement
-                       (perfect swing, ball at projected location = batter's information)
-
-    Decomposition:
-      disruption_tax     = xrv_realized − xrv_intended  [negative = pitcher advantage]
-      spatial_distortion = xrv_spatial  − xrv_intended  spatial displacement alone
-      angular_disruption = xrv_realized − xrv_spatial   angular deviation on top of shift
-
-    Angular distortion share (from mediator models, clipped to [0, 1]):
-      distortion_dev_m = a_x_m × pc_dev_x + a_z_m × pc_dev_z
-      angular_distortion_share = ||distortion_dev||² / ||total_dev||²
-
-    Final outputs:
-      distortion_tax = spatial_distortion + angular_disruption × angular_distortion_share
-      selection_tax  = angular_disruption × (1 − angular_distortion_share)
-      distortion_share = distortion_tax / disruption_tax  (clipped to [0, 1])
-
-    Note: disruption_tax = distortion_tax + selection_tax is preserved exactly.
+    Signature updated: xwoba_model replaced by exit_velo_model, launch_angle_model, ev_la_rv_model.
+    New output columns: ev_realized, la_realized, ev_intended, la_intended, ev_suppression.
+    All existing output columns (disruption_tax, distortion_tax, selection_tax, ...) unchanged.
     """
     prefix    = f"pc{commit_ms}"
     emp       = "emp_" if empirical else ""
     dev_x_col = f"{prefix}_{emp}dev_x"
     dev_z_col = f"{prefix}_{emp}dev_z"
 
-    args = (df, bip_model, foul_model, xwoba_model, whiff_rv, foul_rv)
+    args = (df, bip_model, foul_model, exit_velo_model, launch_angle_model, ev_la_rv_model,
+            whiff_rv, foul_rv)
 
     xrv_realized = _xrv_from_shape(*args, commit_ms=commit_ms,
                                     zero_angular=False, zero_spatial=False, empirical=empirical)
@@ -237,7 +234,6 @@ def disruption_tax_split(df, bip_model, foul_model, xwoba_model, whiff_rv, foul_
     spatial_distortion = xrv_spatial  - xrv_intended
     angular_disruption = xrv_realized - xrv_spatial
 
-    # ── angular distortion share (mediator attribution) ───────────────────────
     attr_cols = {}
     for dev_col, model in mediator_models.items():
         a_x = model.params.get(dev_x_col, 0.0)
@@ -257,9 +253,6 @@ def disruption_tax_split(df, bip_model, foul_model, xwoba_model, whiff_rv, foul_
 
     distortion_tax = spatial_distortion + angular_disruption * angular_distortion_share
     selection_tax  = angular_disruption * (1 - angular_distortion_share)
-
-    # distortion_share: fraction of total disruption attributable to movement.
-    # Defined post-hoc so it always satisfies distortion_tax + selection_tax = disruption_tax.
     distortion_share = np.where(
         disruption_tax.abs() > 1e-8,
         np.clip(distortion_tax / disruption_tax, 0.0, 1.0),
@@ -267,34 +260,50 @@ def disruption_tax_split(df, bip_model, foul_model, xwoba_model, whiff_rv, foul_
     )
 
     out = df.copy()
-    out["disruption_tax"]        = disruption_tax
+    out["disruption_tax"]         = disruption_tax
     out["spatial_distortion_tax"] = spatial_distortion
-    out["distortion_tax"]        = distortion_tax
-    out["selection_tax"]         = selection_tax
-    out["distortion_share"]      = distortion_share
-    out["_xrv_intended"]         = xrv_intended.values   # internal; used by compute_decision_cost
+    out["distortion_tax"]         = distortion_tax
+    out["selection_tax"]          = selection_tax
+    out["distortion_share"]       = distortion_share
+    out["_xrv_intended"]          = xrv_intended.values
+
+    # ── EV/LA counterfactual columns (BIP only; NaN on whiffs/fouls) ─────────
+    bip_mask = df["is_bip"] == 1
+
+    # Realized EV/LA — from raw data
+    out["ev_realized"] = np.where(bip_mask, df["launch_speed"],  np.nan)
+    out["la_realized"] = np.where(bip_mask, df["launch_angle"],  np.nan)
+
+    # Intended EV/LA — model prediction under intended swing (zero angular dev, zero spatial)
+    intended_feat = df[["balls", "strikes"]].copy()
+    prefix_emp    = f"pc{commit_ms}_{'emp_' if empirical else ''}x_proj"
+    prefix_emp_z  = f"pc{commit_ms}_{'emp_' if empirical else ''}z_proj"
+    intended_feat["plate_x"] = df[prefix_emp]
+    intended_feat["plate_z"] = df[prefix_emp_z]
+    for dev in ANGULAR_DEVS:
+        intended_feat[dev] = 0.0
+
+    ev_int = exit_velo_model.predict(intended_feat[OUTCOME_FEATURES])
+    la_int = launch_angle_model.predict(intended_feat[OUTCOME_FEATURES])
+    out["ev_intended"] = np.where(bip_mask, ev_int,  np.nan)
+    out["la_intended"] = np.where(bip_mask, la_int,  np.nan)
+
+    # EV suppression: realized − intended (negative = pitcher suppressed EV)
+    out["ev_suppression"] = np.where(
+        bip_mask,
+        out["ev_realized"] - out["ev_intended"],
+        np.nan,
+    )
+
     return out
 
 
 # ── 4. Indirect effect (product-of-coefficients) ───────────────────────────────
 
-def indirect_effect(mediator_models, bip_model, foul_model, xwoba_model,
-                    whiff_rv, foul_rv, df, commit_ms=150, eps=0.5, empirical=True):
-    """Numerical indirect effect of post-commit movement on run value.
-
-    Replaces the previous analytical formula (which required logistic model coefficients)
-    with a central finite-difference gradient — compatible with any predict API.
-
-    For each angular deviation m:
-      indirect_{m} = a_{m} × ∂xRV/∂m
-
-    ∂xRV/∂m ≈ (xRV(m + eps) − xRV(m − eps)) / (2 × eps)
-
-    eps is in the same units as the deviation (degrees for angular metrics).
-
-    Returns a DataFrame with rows = deviation axes, columns:
-      [a_x, a_z, grad_xrv, indirect_x, indirect_z]
-    """
+def indirect_effect(mediator_models, bip_model, foul_model, exit_velo_model,
+                    launch_angle_model, ev_la_rv_model, whiff_rv, foul_rv,
+                    df, commit_ms=150, eps=0.5, empirical=True):
+    """Numerical indirect effect — signature updated for EV/LA chain."""
     prefix = f"pc{commit_ms}"
     emp    = "emp_" if empirical else ""
     dev_x  = f"{prefix}_{emp}dev_x"
@@ -306,13 +315,15 @@ def indirect_effect(mediator_models, bip_model, foul_model, xwoba_model,
         feat  = score_df[OUTCOME_FEATURES]
         p_bip = bip_model.predict_proba(feat)[:, 1]
         p_fc  = foul_model.predict_proba(feat)[:, 1]
-        e_xw  = xwoba_model.predict(feat)
+        ev_pred    = exit_velo_model.predict(feat)
+        la_pred    = launch_angle_model.predict(feat)
+        e_rv_bip   = ev_la_rv_model.predict(np.column_stack([ev_pred, la_pred]))
         keys  = list(zip(score_df["balls"].astype(int), score_df["strikes"].astype(int)))
         w_rv  = np.array([whiff_rv.get(k, whiff_rv["default"]) for k in keys])
         f_rv  = np.array([foul_rv.get(k,  foul_rv["default"])  for k in keys])
         p_f   = (1 - p_bip) * p_fc
         p_w   = (1 - p_bip) * (1 - p_fc)
-        return (p_bip * e_xw + p_f * f_rv + p_w * w_rv).mean()
+        return (p_bip * e_rv_bip + p_f * f_rv + p_w * w_rv).mean()
 
     rows = []
     for dev_col, med_model in mediator_models.items():
