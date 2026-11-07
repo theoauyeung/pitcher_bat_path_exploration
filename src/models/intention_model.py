@@ -71,6 +71,11 @@ def _effort_formula(resp):
 
 def _prep(df, n_subsample=None, seed=345):
     """Filter to valid tracked swings and build derived columns."""
+    # offset_y_ms is a Hawk-Eye timing column absent from some data sources.
+    # Adding it as NaN here lets the imputation block below handle it uniformly.
+    if "offset_y_ms" not in df.columns:
+        df = df.copy()
+        df["offset_y_ms"] = float("nan")
     need = list(ALL_RESPONSES) + [
         "balls", "strikes", "plate_x", "plate_z",
         "batter_stand", "batter_id", "pitcher_id",
