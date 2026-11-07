@@ -67,8 +67,10 @@ def fit_mediator_models(df, commit_ms=150, empirical=True):
     x_proj = f"{prefix}_{emp}x_proj"
     z_proj = f"{prefix}_{emp}z_proj"
 
+    has_timing = "offset_y_ms" in df.columns and df["offset_y_ms"].notna().any()
+    timing_cols = ["offset_y_ms"] if has_timing else []
     needed = [dev_x, dev_z, x_proj, z_proj,
-              "release_speed", "balls", "strikes", "offset_y_ms", "batter_id", "pitcher_id"]
+              "release_speed", "balls", "strikes", "batter_id", "pitcher_id"] + timing_cols
 
     models = {}
     for dev_col in ANGULAR_DEVS:
@@ -78,10 +80,11 @@ def fit_mediator_models(df, commit_ms=150, empirical=True):
         d["batter_id"]  = d["batter_id"].astype("category")
         d["pitcher_id"] = d["pitcher_id"].astype("category")
 
+        timing_term = " + offset_y_ms" if has_timing else ""
         formula = (
             f"{dev_col} ~ {dev_x} + {dev_z}"
             f" + {x_proj} + {z_proj}"
-            f" + release_speed + balls + strikes + offset_y_ms"
+            f" + release_speed + balls + strikes{timing_term}"
         )
         # To add crossed pitcher RE (slow on large datasets): add
         #   vc_formula={"pitcher_id": "0 + C(pitcher_id)"}
