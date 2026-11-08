@@ -142,8 +142,8 @@ Development utility that polls for file changes and auto-commits to git after a 
 | File | Contents |
 |------|----------|
 | `results/xrv_causal.parquet` | Per-swing: `disruption_tax`, `adjusted_disruption_tax`, `distortion_tax`, `selection_tax`, `spatial_distortion_tax`, `distortion_share`, `miss_distortion_tax`, `decision_cost`, `ev_realized`, `la_realized`, `ev_intended`, `la_intended`, `ev_suppression` |
-| `results/distortion_pitcher.csv` | Pitcher-level leaderboard (≥50 swings); includes `mean_ev_suppression` and `mean_la_change` |
-| `results/distortion_batter.csv` | Batter-level leaderboard (≥50 swings); includes `mean_ev_suppression` and `mean_la_change` |
+| `results/distortion_pitcher.csv` | Pitcher-level leaderboard (≥500 swings); includes `mean_ev_suppression` and `mean_la_change` |
+| `results/distortion_batter.csv` | Batter-level leaderboard (≥500 swings); includes `mean_ev_suppression` and `mean_la_change` |
 | `results/plots/leaderboards/` | Distortion tax leaderboard tables (PNG) |
 | `results/plots/validation/` | Reliability, xwOBA relationship, outcome rates (PNG) |
 | `results/plots/diagnostics/` | Axis fingerprint, count/fixed effects, physical drivers (PNG) |

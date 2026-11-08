@@ -295,17 +295,18 @@ def disruption_tax_split(df, bip_model, foul_model, exit_velo_model, launch_angl
     out["ev_realized"] = np.where(bip_mask, df["launch_speed"],  np.nan)
     out["la_realized"] = np.where(bip_mask, df["launch_angle"],  np.nan)
 
-    # Intended EV/LA — model prediction under intended swing (zero angular dev, zero spatial)
-    intended_feat = df[["balls", "strikes"]].copy()
-    prefix_emp    = f"pc{commit_ms}_{'emp_' if empirical else ''}x_proj"
-    prefix_emp_z  = f"pc{commit_ms}_{'emp_' if empirical else ''}z_proj"
-    intended_feat["plate_x"] = df[prefix_emp]
-    intended_feat["plate_z"] = df[prefix_emp_z]
-    for dev in ANGULAR_DEVS:
-        intended_feat[dev] = 0.0
+    # Intended EV/LA — EV/LA models use absolute angles, so substitute intended_* angles
+    # and project plate location; mirrors the zero_angular + zero_spatial branch of _xrv_from_shape.
+    prefix_emp   = f"pc{commit_ms}_{'emp_' if empirical else ''}x_proj"
+    prefix_emp_z = f"pc{commit_ms}_{'emp_' if empirical else ''}z_proj"
+    ev_la_int = df[["balls", "strikes"]].copy()
+    ev_la_int["plate_x"] = df[prefix_emp]
+    ev_la_int["plate_z"] = df[prefix_emp_z]
+    for abs_col, int_col in zip(ANGULAR_ABS, ANGULAR_INT):
+        ev_la_int[abs_col] = df[int_col]
 
-    ev_int = exit_velo_model.predict(intended_feat[OUTCOME_FEATURES])
-    la_int = launch_angle_model.predict(intended_feat[OUTCOME_FEATURES])
+    ev_int = exit_velo_model.predict(ev_la_int[EV_LA_FEATURES])
+    la_int = launch_angle_model.predict(ev_la_int[EV_LA_FEATURES])
     out["ev_intended"] = np.where(bip_mask, ev_int,  np.nan)
     out["la_intended"] = np.where(bip_mask, la_int,  np.nan)
 
@@ -330,14 +331,26 @@ def indirect_effect(mediator_models, bip_model, foul_model, exit_velo_model,
     dev_x  = f"{prefix}_{emp}dev_x"
     dev_z  = f"{prefix}_{emp}dev_z"
 
-    d = df[OUTCOME_FEATURES + [dev_x, dev_z]].dropna()
+    # Include ANGULAR_INT so _mean_xrv can reconstruct absolute angles for EV/LA models.
+    need = OUTCOME_FEATURES + list(ANGULAR_INT) + [dev_x, dev_z]
+    d = df[need].dropna()
+    _wide_cols = OUTCOME_FEATURES + list(ANGULAR_INT)
 
     def _mean_xrv(score_df):
         feat  = score_df[OUTCOME_FEATURES]
         p_bip = bip_model.predict_proba(feat)[:, 1]
         p_fc  = foul_model.predict_proba(feat)[:, 1]
-        ev_pred    = exit_velo_model.predict(feat)
-        la_pred    = launch_angle_model.predict(feat)
+        # Absolute angle = intended + current deviation; mirrors _xrv_from_shape logic.
+        ev_la_arr = np.column_stack([
+            *(score_df[int_col].values + score_df[dev_col_name].values
+              for int_col, dev_col_name in zip(ANGULAR_INT, ANGULAR_DEVS)),
+            score_df["plate_x"].values,
+            score_df["plate_z"].values,
+            score_df["balls"].values,
+            score_df["strikes"].values,
+        ])
+        ev_pred    = exit_velo_model.predict(ev_la_arr)
+        la_pred    = launch_angle_model.predict(ev_la_arr)
         e_rv_bip   = ev_la_rv_model.predict(np.column_stack([ev_pred, la_pred]))
         keys  = list(zip(score_df["balls"].astype(int), score_df["strikes"].astype(int)))
         w_rv  = np.array([whiff_rv.get(k, whiff_rv["default"]) for k in keys])
@@ -351,8 +364,8 @@ def indirect_effect(mediator_models, bip_model, foul_model, exit_velo_model,
         a_x = med_model.params.get(dev_x, np.nan)
         a_z = med_model.params.get(dev_z, np.nan)
 
-        score_up = d[OUTCOME_FEATURES].copy(); score_up[dev_col] += eps
-        score_dn = d[OUTCOME_FEATURES].copy(); score_dn[dev_col] -= eps
+        score_up = d[_wide_cols].copy(); score_up[dev_col] += eps
+        score_dn = d[_wide_cols].copy(); score_dn[dev_col] -= eps
 
         grad_xrv = (_mean_xrv(score_up) - _mean_xrv(score_dn)) / (2 * eps)
 
