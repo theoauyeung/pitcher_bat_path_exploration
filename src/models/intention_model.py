@@ -25,7 +25,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from matplotlib.patches import Ellipse
-import bambi as bmb
+# bambi (and its pymc/pytensor chain) is lazy-imported inside fit() so that
+# --skip-phase-a runs don't pay the 60-minute import cost.
 
 
 # ── Response sets ──────────────────────────────────────────────────────────────
@@ -130,6 +131,8 @@ def fit(df, n_subsample=None, draws=1000, tune=1000, chains=4,
     responses:    subset of ALL_RESPONSES to fit; default is all five.
     Returns {"models": {resp: bmb.Model}, "idata": {resp: InferenceData}, "data": d}.
     """
+    import bambi as bmb  # lazy: only needed when actually fitting
+
     d = _prep(df, n_subsample=n_subsample, seed=seed)
 
     if responses is None:
