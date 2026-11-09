@@ -27,6 +27,7 @@ __pycache__/
 .planning/
 .superpowers/
 docs/superpowers/
+CLAUDE.md
 
 # Experiments
 experiments/
