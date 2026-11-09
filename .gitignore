@@ -22,9 +22,11 @@ __pycache__/
 *.pyo
 .venv/
 
-# Internal Claude tooling
+# Internal tooling
 .claude/
 .planning/
+.superpowers/
+docs/superpowers/
 
 # Experiments
 experiments/

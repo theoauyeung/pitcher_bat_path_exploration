@@ -4,14 +4,82 @@ Causal mediation analysis estimating how post-commit pitch movement disrupts bat
 
 ---
 
-## Research question
+## What this is
 
-When a pitcher throws a breaking ball, some of the swing deviation it induces is physically unavoidable — the ball moved after the batter's swing was already committed. Some is attributable to the batter's own decision. This project separates the two.
+When a pitcher throws a breaking ball, some of the swing disruption it causes is physically unavoidable — the ball moved after the batter's swing was already committed. Some is the batter's own decision. This project separates the two.
 
-A batter cannot react to ball movement that occurs within ~150 ms of contact. Any deviation between the ball's projected and actual plate-crossing location after that window is exogenous to the swing decision. We use this to decompose per-swing run-value loss into:
+A batter cannot react to ball movement within ~150 ms of contact. Any deviation between the ball's projected and actual plate-crossing location after that window is exogenous to the swing decision. The pipeline uses this to decompose per-swing run-value loss into:
 
 - **Distortion** — run-value cost caused by post-commit pitch movement (spatial displacement + induced swing-plane deviation)
 - **Selection** — run-value cost attributable to the batter's own swing decision
+
+---
+
+## Pipeline
+
+```bash
+# 1. Pull Statcast data (R ≥ 4.0, sabRmetrics, tidyverse)
+Rscript src/data/pull_savant.R          # data/savant_raw.csv + results/linear_weights.csv
+
+# 2. Process swings
+.venv/bin/python src/data/process_savant.py     # data/swings_2023_2025.csv
+
+# 3. Pre/post-commit trajectory split
+.venv/bin/python src/data/precommit_split.py    # data/swings_precommit.parquet
+
+# 4. Phase A + Phase B causal pipeline
+.venv/bin/python src/models/run_pipeline.py     # results/xrv_causal.parquet + leaderboards
+```
+
+`run_pipeline.py` accepts `--skip-phase-a` to reload cached Phase A output without refitting, and `--method vi` for fast ADVI inference (~2 min vs. hours for MCMC).
+
+---
+
+## Methodology
+
+### Pre/post-commit trajectory split
+
+Each pitch's full flight path is reconstructed from release parameters. For each swing, we find where the ball *would have* crossed the plate on a constant-acceleration trajectory from commit time forward. The gap between this projected location and the actual plate crossing is the post-commit deviation — movement the batter had no time to respond to.
+
+Commit time is set at 150 ms pre-contact. This is intentionally conservative (understates late movement) so the effect is not overstated. The pipeline runs a sensitivity grid over 125–200 ms; the relative ordering between pitchers is stable across the grid.
+
+### Batter intended swing (Phase A)
+
+For each of five swing-shape responses (vertical and horizontal attack angle, swing path tilt, bat speed, swing length), a Bayesian linear mixed-effects model is fit using pitch location, count, contact timing, and platoon handedness. Per-batter random effects capture each batter's baseline tendencies and their count-pressure adjustments.
+
+The residual — realized minus predicted — is the swing deviation used as the Phase B mediator.
+
+Default inference is ADVI (`method="vi"`, ~2 min). Only posterior means are used downstream so VI is equivalent to MCMC here.
+
+### Run-value mediation (Phase B)
+
+**Mediator models** (OLS) estimate how much of each angular swing deviation was mechanically forced by post-commit movement. The treatment coefficients give causal leverage: degrees of swing deviation per foot of late movement.
+
+**Outcome models** (XGBoost) price swing deviation in run value across three channels:
+- P(ball in play)
+- P(foul | not in play) — separated from whiff because a two-strike foul extends the PA
+- E[exit velocity | BIP] → E[launch angle | BIP] → E[run value | BIP] via linear weights
+
+The BIP channel runs through explicit EV/LA predictions rather than a direct xwOBA model, so the distortion story is interpretable: "late movement cost X mph of exit velocity and Y° of launch angle, worth Z runs."
+
+**Disruption tax** is computed via three counterfactual scenarios:
+
+| Scenario | Swing angles | Plate location |
+|----------|-------------|----------------|
+| Realized | actual deviations | actual (post-movement) |
+| Spatial only | zero deviations | actual (post-movement) |
+| Intended | zero deviations | projected (pre-movement) |
+
+```
+disruption_tax          = xrv_realized − xrv_intended
+spatial_distortion      = xrv_spatial  − xrv_intended
+angular_disruption      = xrv_realized − xrv_spatial
+distortion_tax          = spatial_distortion + angular_disruption × angular_distortion_share
+selection_tax           = angular_disruption × (1 − angular_distortion_share)
+adjusted_disruption_tax = disruption_tax − max(0, decision_cost)
+```
+
+`angular_distortion_share` uses squared-norm decomposition across VAA, HAA, and swing-path tilt. `adjusted_disruption_tax` shifts the baseline to `take_xrv` when the batter should have taken the pitch.
 
 ---
 
@@ -19,47 +87,23 @@ A batter cannot react to ball movement that occurs within ~150 ms of contact. An
 
 ```
 src/
-  data/       pull_data.py, precommit_split.py, run_values.py
-  models/     intention_model.py, causal_models.py, run_pipeline.py
-  viz/        generate_results.ipynb, kinematic_diagram.py, leaderboard_table.R
-  utils/      db.py, watch_commit.py
-data/         swings_2023_2025.csv, swings_precommit.parquet  (not tracked)
-models/       *.joblib, *.parquet  (not tracked)
+  data/     pull_savant.R, process_savant.py, precommit_split.py
+  models/   intention_model.py, causal_models.py, run_pipeline.py
+  viz/      eda.ipynb, intention_model.ipynb, causal_model.ipynb,
+            validation.ipynb, results.ipynb,
+            kinematic_diagram.py, leaderboard_table.R
+  utils/    db.py
+data/       savant_raw.csv, swings_2023_2025.csv, swings_precommit.parquet  (not tracked)
+models/     *.joblib, *.parquet  (not tracked)
 results/
-  *.csv                              leaderboards, linear weights, RE24
+  *.csv                    leaderboards, linear weights, RE24, validity checks
   plots/
-    leaderboards/                    distortion tax leaderboard tables
-    validation/                      reliability, xwOBA relationship, outcome rates
-    diagnostics/                     axis fingerprint, count effects, fixed effects
-    case_studies/                    annotated broadcast cards
-docs/
-  *.md                               design docs, results draft
-  screenshots/                       reference screenshots for kinematic diagrams
-```
-
----
-
-## Pipeline
-
-```bash
-.venv/bin/python src/data/pull_data.py          # pull MLB pitch-by-pitch from mlb_db → data/
-.venv/bin/python src/data/precommit_split.py    # compute pre/post-commit trajectory split
-.venv/bin/python src/data/run_values.py         # build RE24, linear weights
-.venv/bin/python src/models/run_pipeline.py     # Phase A + Phase B → results/xrv_causal.parquet
-```
-
-`src/models/run_pipeline.py` accepts `--skip-phase-a` to reload cached Phase A output without refitting, and `--method vi` for fast ADVI inference (~2 min vs. hours for MCMC).
-
-Visualization (run after pipeline):
-
-```bash
-# All paper figures — open and run src/viz/generate_results.ipynb in Jupyter or VS Code
-
-# Annotated broadcast cards per pitch (requires DB connection)
-.venv/bin/python src/viz/kinematic_diagram.py
-
-# Leaderboard tables with MLB headshots (requires R)
-Rscript src/viz/leaderboard_table.R
+    leaderboards/          distortion tax leaderboard tables
+    validation/            reliability, outcome rates, xwOBA relationship
+    diagnostics/           axis fingerprint, count effects, fixed effects
+    case_studies/          annotated broadcast cards
+docs/       design notes for the mediation model, intention model, and output metrics
+tests/      unit tests for process_savant.py and the EV/LA model chain
 ```
 
 ---
@@ -68,213 +112,49 @@ Rscript src/viz/leaderboard_table.R
 
 | File | Contents |
 |------|----------|
-| `results/xrv_causal.parquet` | Per-swing disruption / adjusted disruption / distortion / selection / spatial distortion / miss / decision cost |
-| `results/distortion_pitcher.csv` | Pitcher-level distortion leaderboard (≥50 swings) |
-| `results/distortion_batter.csv` | Batter-level disruption leaderboard (≥50 swings) |
-| `results/plots/leaderboards/` | Distortion tax leaderboard tables (PNG) |
-| `results/plots/validation/` | Reliability, xwOBA relationship, outcome rates (PNG) |
-| `results/plots/diagnostics/` | Axis fingerprint, count/fixed effects, physical drivers (PNG) |
-| `results/plots/case_studies/` | Annotated broadcast cards — Yamamoto, Leiter, Helsley, Sale (PNG) |
-
----
-
-## Methodology
-
-### Step 1 — Pre/post-commit trajectory split
-
-Each pitch's full flight path is reconstructed from release parameters. For each swing, we compute where the ball *would have* crossed the plate had it continued on a constant-acceleration trajectory from commit time forward. The gap between this projected location and the actual plate crossing is the post-commit deviation — movement the batter had no time to respond to.
-
-Commit time is set conservatively at 150 ms pre-contact to understate rather than overstate late movement. The robustness grid over 125–200 ms treats this as a sensitivity check.
-
-### Step 2 — Batter intended swing
-
-For each of five swing-shape responses (vertical and horizontal attack angle, swing path tilt, bat speed, swing length), we fit a Bayesian linear mixed-effects model using pitch location, count, contact timing, and platoon handedness as predictors. Per-batter random effects capture each batter's baseline tendencies and how they adjust under count pressure.
-
-The residual — realized minus predicted — is the swing deviation used as the mediator in Step 3.
-
-### Step 3 — Run-value mediation
-
-**Mediator models** estimate how much of each angular swing deviation is mechanically caused by post-commit movement. The treatment coefficients give the causal leverage: degrees of swing deviation per foot of late movement.
-
-**Outcome models** price swing deviation in run value via three channels: P(ball in play), P(foul | not in play), and E[xwOBA | ball in play]. Foul and whiff are modeled separately because at two strikes a foul keeps the at-bat alive while a whiff ends it.
-
-**Disruption tax** uses three counterfactual scenarios:
-
-| Scenario | Swing angles | Plate location |
-|----------|-------------|----------------|
-| Realized | actual deviations | actual (post-movement) |
-| Spatial only | zero deviations | actual (post-movement) |
-| Intended | zero deviations | projected (pre-movement) |
-
-Total disruption decomposes into spatial distortion (the ball arrived somewhere different than the batter expected) and angular disruption (the batter's swing plane was knocked off-target). The angular component splits further based on how much was mechanically forced by movement vs. the batter's own decision.
-
-The pipeline also computes **physical miss** (bat-to-ball separation on contact and whiffs), **decision cost** (opportunity cost of swinging vs. taking at the projected location), and **adjusted disruption tax**: `disruption_tax − max(0, decision_cost)`. The adjusted metric captures total batter cost vs. the optimal available action.
+| `results/xrv_causal.parquet` | Per-swing: disruption tax, distortion tax, selection tax, spatial distortion, EV/LA realized and intended, EV suppression, decision cost |
+| `results/distortion_pitcher.csv` | Pitcher-level leaderboard (≥500 swings) |
+| `results/distortion_batter.csv` | Batter-level leaderboard (≥500 swings) |
+| `results/plots/leaderboards/` | Leaderboard tables with MLB headshots (R/gt) |
+| `results/plots/validation/` | Reliability, outcome rates, xwOBA relationship, convergent/incremental validity |
+| `results/plots/diagnostics/` | Axis fingerprint, count effects, fixed effects, physical drivers |
+| `results/plots/case_studies/` | Annotated broadcast cards — Yamamoto, Leiter, Helsley, Sale |
 
 ---
 
 ## Data
 
-Source: `mlb_db` (internal Driveline MySQL), MLB regular-season 2023–2025. Requires internal network access. ~763k competitive swings after filtering (bat speed ≥ 50 mph).
+Source: Baseball Savant (MLB Statcast), 2023–2025 regular season, pulled via the [`sabRmetrics`](https://github.com/drivelineresearch/sabRmetrics) R package. ~763k competitive swings after filtering (bat speed ≥ 50 mph).
 
-Large files (`data/`, `models/*.joblib`, `results/*.parquet` > 25 MB) are not tracked. Re-generate by running the pipeline.
-
----
-
-## Dependencies
-
-This project uses [uv](https://docs.astral.sh/uv/) and Python **3.14**. All direct dependencies are pinned in `requirements.txt`.
-
-```bash
-# Install uv (once per machine)
-curl -LsSf https://astral.sh/uv/install.sh | sh     # Mac/Linux
-# or: brew install uv
-
-# Create venv and install
-uv venv --python 3.14
-source .venv/bin/activate
-uv pip install -r requirements.txt
-```
+Large files (`data/`, `models/*.joblib`, `results/*.parquet`) are not tracked. Run the pipeline to regenerate.
 
 ---
 
-## Resuming on a new Mac
+## Setup
 
-> **No Driveline account or DB access needed** — everything required for day-to-day analysis (regenerating all figures, running the R leaderboard tables, editing the results paper) is self-contained once you have the data bundle. Only `pull_data.py` (fresh data pull) and `kinematic_diagram.py` (broadcast cards) require Driveline network/VPN.
-
-### What requires Driveline access vs. what doesn't
-
-| Task | Needs Driveline? |
-|------|-----------------|
-| Regenerate all paper figures | No |
-| Regenerate R leaderboard tables | No |
-| Edit results draft | No |
-| Rerun Phase A + Phase B models | No (cached in bundle) |
-| Pull fresh MLB data (`pull_data.py`) | Yes — internal DB/VPN |
-| Generate kinematic broadcast cards | Yes — internal DB |
-
-When you do run `pull_data.py` at Driveline or via VPN, set `DATA_EXPORT_DIR` once in `~/.claude/.env` and the output CSV copies to personal cloud automatically on every pull:
-
-```
-# ~/.claude/.env
-DATA_EXPORT_DIR=/Users/theo/Library/CloudStorage/iCloudDrive/pitcher_data
-# or Google Drive: DATA_EXPORT_DIR=/Users/theo/Library/CloudStorage/GoogleDrive-you@gmail.com/My Drive/pitcher_data
-```
-
-The directory must already exist. The script prints confirmation after copying.
-
----
-
-### Get the data bundle (browser — no desktop app needed)
-
-The data bundle (`pitcher_bat_path_bundle.zip`, 3.29 GB) is in **Driveline OneDrive**. Download from any browser — no OneDrive desktop app or email client required:
-
-1. Go to **onedrive.com** (or **office.com → OneDrive**) and sign in with `theo.an-yeung@drivelinebaseball.com`
-2. In *My files* (root level), find **`pitcher_bat_path_bundle.zip`** and download it
-3. Confirm the downloaded file is 3.29 GB before continuing
-
----
-
-### 1 — Clone the repo
+This project uses [uv](https://docs.astral.sh/uv/) and Python 3.14.
 
 ```bash
-git clone https://github.com/theoauyeung/pitcher_bat_path_exploration.git
-cd pitcher_bat_path_exploration
-```
-
-No credentials needed — the repo is public.
-
-### 2 — Unzip the bundle into the repo
-
-```bash
-unzip /path/to/pitcher_bat_path_bundle.zip
-# extracts data/, models/, results/ directly into the repo root
-```
-
-Confirm these exist after unzipping:
-- `data/swings_precommit.parquet` (617 MB)
-- `models/causal_models.joblib` (1.5 GB)
-- `results/xrv_causal.parquet` (52 MB)
-
-### 3 — Set up Python
-
-```bash
-# Install uv (package + Python version manager)
-curl -LsSf https://astral.sh/uv/install.sh | sh
-source ~/.local/bin/env    # or open a new terminal
-
-# Install Python 3.14 and create the venv
 uv python install 3.14
 uv venv --python 3.14
 source .venv/bin/activate
-
-# Install all dependencies
 uv pip install -r requirements.txt
 ```
 
-This takes 3–5 minutes on first install. No Driveline access needed — all packages are from PyPI.
+R packages (for data pull and leaderboard tables):
 
-### 4 — Set up R (for leaderboard tables)
-
-```bash
-# Install Homebrew first if not present
-/bin/bash -c "$(curl -fsSF https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-
-brew install r
-
-# Install R packages (run once — downloads from CRAN, no Driveline needed)
-Rscript -e 'install.packages(c("arrow","dplyr","gt","gtExtras","mlbplotR","scales","webshot2"), repos="https://cloud.r-project.org")'
+```r
+install.packages(c("sabRmetrics", "tidyverse", "arrow", "dplyr",
+                   "gt", "gtExtras", "mlbplotR", "scales", "webshot2"))
 ```
-
-### 5 — Verify everything works
-
-```bash
-# Should write results/plots/leaderboards/*.png — no network or DB needed
-Rscript src/viz/leaderboard_table.R
-
-# Open src/viz/generate_results.ipynb in Jupyter or VS Code and run all cells
-# — should write PNGs to results/plots/ with no errors
-```
-
-Both commands run fully offline from the bundle files.
-
-### Path changes from Windows to Mac
-
-| Item | Windows | Mac |
-|------|---------|-----|
-| Activate venv | `.venv\Scripts\activate` | `source .venv/bin/activate` |
-| Run Python | `.venv\Scripts\python.exe` | `.venv/bin/python` |
-| Run Rscript | Full path to `Rscript.exe` | `Rscript` (on PATH after brew) |
-| Path separator | `\` | `/` |
-
-No hardcoded Windows paths exist in the Python or R scripts — all paths use forward slashes or `pathlib.Path`.
-
-### Personal checklist
-
-**On the old machine before returning it:**
-- [ ] Confirm `pitcher_bat_path_bundle.zip` on Driveline OneDrive shows "Up to date" (green checkmark, not sync arrows) — allow 10–20 min if recently written
-
-**On the new Mac:**
-- [ ] Go to **onedrive.com** in a browser, sign in with `theo.an-yeung@drivelinebaseball.com`, download `pitcher_bat_path_bundle.zip` — no desktop app needed
-- [ ] Confirm downloaded file is 3.29 GB
-- [ ] `git clone https://github.com/theoauyeung/pitcher_bat_path_exploration.git && cd pitcher_bat_path_exploration`
-- [ ] `unzip ~/Downloads/pitcher_bat_path_bundle.zip -d .` — confirms `data/`, `models/`, `results/` land in repo root
-- [ ] `uv python install 3.14 && uv venv --python 3.14 && source .venv/bin/activate && uv pip install -r requirements.txt`
-- [ ] `brew install r` then `Rscript -e 'install.packages(c("arrow","dplyr","gt","gtExtras","mlbplotR","scales","webshot2"), repos="https://cloud.r-project.org")'`
-- [ ] `Rscript src/viz/leaderboard_table.R` — confirm three PNGs saved to `results/plots/leaderboards/`
-- [ ] Open `src/viz/generate_results.ipynb` in Jupyter or VS Code and run all cells — confirm PNGs write to `results/plots/` with no errors
 
 ---
 
 ## Kinematic diagrams
 
-Each figure is a two-panel broadcast card: game screenshot with arrow callout (left) + dark metrics panel (right). The **DISRUPTION ANALYSIS** section shows:
+`src/viz/kinematic_diagram.py` generates two-panel broadcast cards: game screenshot with callout arrow (left) + metrics panel (right). The metrics panel shows post-commit drop, projected vs. actual plate crossing, disruption/decision/total burden, and the distortion/selection split.
 
-- **Post-commit drop** — vertical inches the ball moves after the batter commits. Movement the batter cannot react to.
-- **Proj. → actual** — the ball's projected vs. actual plate-crossing height, with zone context.
-- **Swing disruption** — run-value cost conditional on the decision to swing (`disruption_tax`; negative = pitcher advantage).
-- **Decision / Chase cost** — opportunity cost of swinging vs. taking at the projected location. Green when swinging was correct; red when taking was better.
-- **Total burden** — `adjusted_disruption_tax = disruption_tax − max(0, decision_cost)`. Total batter cost vs. the optimal available action.
-- **Distortion / Selection bar** — fraction of swing disruption caused by post-commit movement (red) vs. the batter's own decision (amber).
+Requires a DB connection for the game video frames. The four case studies in `results/plots/case_studies/` are pre-generated.
 
 | Pitcher / Batter | Pitch | Dominant cause |
 |-----------------|-------|----------------|
