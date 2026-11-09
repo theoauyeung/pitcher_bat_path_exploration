@@ -115,9 +115,38 @@ adjusted_disruption_tax = disruption_tax − max(0, decision_cost)
 
 Runs Phase A → Phase B in sequence and writes all outputs. Key flag: `--skip-phase-a` loads cached Phase A output. Use `method="vi"` for fast iteration.
 
-### `src/viz/generate_results.ipynb` — Paper figures
+### `src/viz/` — Viz notebooks (R kernel)
 
-Jupyter notebook that generates all paper figures from cached pipeline outputs. Open and run all cells in Jupyter or VS Code — no DB connection needed. Writes PNGs to `results/plots/` subdirectories.
+All viz notebooks use the **R kernel** (`ir`). Every plot must use the shared theme and dimensions below — set at the top of each notebook's setup cell:
+
+```r
+library(tidyverse); library(ggthemes); library(patchwork)
+
+options(repr.plot.width = 14, repr.plot.height = 8)
+
+BASE_THEME <- theme_fivethirtyeight() +
+  theme(
+    axis.title        = element_text(size = 14),
+    axis.text         = element_text(size = 13),
+    panel.background  = element_rect(fill = "white", color = NA),
+    plot.background   = element_rect(fill = "white", color = NA),
+    legend.background = element_rect(fill = "white", color = NA),
+    legend.text       = element_text(size = 12),
+    legend.title      = element_text(size = 13),
+    strip.text        = element_text(size = 14, face = "bold"),
+    plot.title        = element_text(size = 20, face = "bold"),
+    plot.subtitle     = element_text(size = 13)
+  )
+theme_set(BASE_THEME)
+```
+
+| Notebook | Purpose |
+|----------|---------|
+| `eda.ipynb` | Data coverage, post-commit deviation distributions, empirical vs linear baseline, commit-time sensitivity |
+| `intention_model.ipynb` | Defend Phase A LMM choices; confirm model captures batter intent |
+| `causal_model.ipynb` | Phase B model checks: controls, axis fingerprint, physical drivers |
+| `validation.ipynb` | Reliability, outcome rates, xwOBA relationship, convergent/incremental validity |
+| `results.ipynb` | Leaderboard, batter vulnerability, economic translation |
 
 ### `src/viz/kinematic_diagram.py` — Annotated broadcast cards
 
