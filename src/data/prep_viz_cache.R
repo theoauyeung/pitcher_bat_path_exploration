@@ -268,5 +268,28 @@ sw_pc_full |>
   ) |>
   write_csv("data/viz_cache/pc_count_dev.csv")
 
-cat("\nDone. 12 files written to data/viz_cache/\n")
+# pc_baseline_compare.csv  (8 rows)
+# Used by: KNN vs linear outcome gradient comparison
+cat("pc_baseline_compare.csv\n")
+sw_pc_full |>
+  filter(!is.na(emp_dev_total), !is.na(lin_dev_total)) |>
+  mutate(
+    emp_q = ntile(emp_dev_total, 4),
+    lin_q = ntile(lin_dev_total, 4)
+  ) |>
+  pivot_longer(c(emp_q, lin_q), names_to = "baseline", values_to = "quartile") |>
+  mutate(baseline = recode(baseline,
+    emp_q = "Empirical (KNN)",
+    lin_q = "Linear (trajectory)"
+  )) |>
+  group_by(baseline, quartile) |>
+  summarise(
+    whiff_rate = mean(outcome == "Whiff"),
+    bip_rate   = mean(outcome == "BIP"),
+    n          = n(),
+    .groups    = "drop"
+  ) |>
+  write_csv("data/viz_cache/pc_baseline_compare.csv")
+
+cat("\nDone. 13 files written to data/viz_cache/\n")
 cat("Run with: Rscript src/data/prep_viz_cache.R\n")
