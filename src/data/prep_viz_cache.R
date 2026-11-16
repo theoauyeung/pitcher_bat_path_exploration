@@ -152,7 +152,7 @@ sw |>
   select(
     pitch_type, pitch_name, outcome, game_year,
     plate_x, plate_z,
-    bat_speed, swing_length,
+    bat_speed, swing_length, swing_path_tilt,
     vert_attack_angle, horz_attack_angle,
     is_bip, launch_speed, launch_angle, delta_run_exp
   ) |>
