@@ -138,14 +138,16 @@ print(zone[["zone_bin", "mean_decision_cost", "n"]].to_string(index=False))
 print("\nBuilding EV suppression cache...")
 
 df_bip = df.dropna(subset=["ev_suppression", "la_change", "distortion_share"]).copy()
-df_bip["dist_quartile"] = pd.qcut(
-    df_bip["distortion_share"], q=4,
-    labels=["Q1\n(least distortion)", "Q2", "Q3", "Q4\n(most distortion)"],
-    duplicates="drop",
+# Use value-based bins since distortion_share has heavy zero mass
+df_bip["dist_q"] = pd.cut(
+    df_bip["distortion_share"],
+    bins=[-0.001, 0.001, 0.15, 0.50, 1.001],
+    labels=[0, 1, 2, 3],
 )
 
+label_map = {0: "Zero\n(0%)", 1: "Low\n(1-15%)", 2: "Mid\n(15-50%)", 3: "High\n(50-100%)"}
 ev_supp = (
-    df_bip.groupby("dist_quartile", observed=True)
+    df_bip.groupby("dist_q", observed=True)
     .agg(
         mean_ev_suppression=("ev_suppression", "mean"),
         se_ev_suppression=("ev_suppression", lambda x: x.std() / np.sqrt(len(x))),
@@ -155,7 +157,9 @@ ev_supp = (
         n=("ev_suppression", "count"),
     )
     .reset_index()
+    .rename(columns={"dist_q": "dist_quartile"})
 )
+ev_supp["quartile_label"] = ev_supp["dist_quartile"].map(label_map)
 ev_supp.to_csv("data/viz_cache/val_ev_suppression.csv", index=False)
 print(f"Saved val_ev_suppression.csv")
 print(ev_supp[["dist_quartile", "mean_ev_suppression", "mean_la_change", "n"]].to_string(index=False))
