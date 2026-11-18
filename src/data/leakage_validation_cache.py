@@ -120,10 +120,14 @@ print(f"Saved lv_pitch_type.csv")
 print(pt[["pitch_name", "mean_distortion_share", "mean_distortion_tax", "n"]].to_string(index=False))
 
 # ── 3. Phase A leakage test: intended_vaa & vaa_dev vs pc150_emp_dev_z ───────
+# Demean within pitch type to remove confounding (breakers have more dev_z AND higher VAA intent)
 print("\nBuilding Phase A leakage cache...")
-df_clean = df.dropna(subset=["vaa_dev", f"pc{COMMIT_MS}_emp_dev_z", "intended_vaa"])
+df_clean = df.dropna(subset=["vaa_dev", f"pc{COMMIT_MS}_emp_dev_z", "intended_vaa", "pitch_type"]).copy()
 
-df_clean = df_clean.copy()
+pt_means = df_clean.groupby("pitch_type")[["intended_vaa", "vaa", "vaa_dev"]].transform("mean")
+df_clean["intended_vaa_demean"] = df_clean["intended_vaa"] - pt_means["intended_vaa"]
+df_clean["vaa_dev_demean"]      = df_clean["vaa_dev"]      - pt_means["vaa_dev"]
+
 df_clean["dev_z_decile"] = pd.qcut(
     df_clean[f"pc{COMMIT_MS}_emp_dev_z"], q=10, labels=False, duplicates="drop"
 )
@@ -134,14 +138,15 @@ phase_a = (
         dev_z_hi=(f"pc{COMMIT_MS}_emp_dev_z", "max"),
         dev_z_mid=(f"pc{COMMIT_MS}_emp_dev_z", "median"),
         mean_intended_vaa=("intended_vaa", "mean"),
-        mean_realized_vaa=("vaa", "mean"),
+        mean_intended_vaa_demean=("intended_vaa_demean", "mean"),
         mean_vaa_dev=("vaa_dev", "mean"),
+        mean_vaa_dev_demean=("vaa_dev_demean", "mean"),
         n=("vaa_dev", "count"),
     )
     .reset_index()
 )
 phase_a.to_csv("data/viz_cache/lv_phase_a.csv", index=False)
 print(f"Saved lv_phase_a.csv")
-print(phase_a[["dev_z_decile", "dev_z_mid", "mean_intended_vaa", "mean_vaa_dev"]].to_string(index=False))
+print(phase_a[["dev_z_decile", "dev_z_mid", "mean_intended_vaa", "mean_intended_vaa_demean", "mean_vaa_dev_demean"]].to_string(index=False))
 
 print("\nDone.")
