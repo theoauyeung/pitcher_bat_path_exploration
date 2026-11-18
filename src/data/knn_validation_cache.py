@@ -66,7 +66,50 @@ eligible  = pitcher_n[pitcher_n >= MIN_N].index
 df_e = df[df["pitcher_id"].isin(eligible)].copy()
 print(f"Eligible for K sensitivity: {len(df_e):,} pitches  |  {len(eligible):,} pitchers")
 
-print("K sensitivity already saved — skipping.")
+# ── 1. K sensitivity: RMSE + std(deviation) per K ────────────────────────────
+import os as _os
+_ksens_path = "data/viz_cache/knn_k_sensitivity.csv"
+_ksens_existing = pd.read_csv(_ksens_path) if _os.path.exists(_ksens_path) else None
+
+if _ksens_existing is not None and "std_dev_z" in _ksens_existing.columns:
+    print("K sensitivity already saved — skipping.")
+else:
+    print("Computing K sensitivity (RMSE + deviation std)...")
+    lin_rmse = None
+    rows = []
+    for k in K_VALUES:
+        sq_errs, devs = [], []
+        for pitcher_id, grp in df_e.groupby("pitcher_id"):
+            if len(grp) < k + 1:
+                continue
+            X      = grp[NORM].values
+            plate_z = grp["plate_z"].values
+            tree = cKDTree(X)
+            _, idxs = tree.query(X, k=k + 1)  # first col is self
+            nb_z  = plate_z[idxs[:, 1:k+1]]
+            pred  = nb_z.mean(axis=1)
+            dev   = plate_z - pred
+            sq_errs.extend((dev ** 2).tolist())
+            devs.extend(dev.tolist())
+        import numpy as _np
+        rmse = _np.sqrt(_np.mean(sq_errs))
+        std_dev = _np.std(devs)
+        if lin_rmse is None:
+            lin_errs = []
+            for pitcher_id, grp in df_e.groupby("pitcher_id"):
+                lin_errs.extend(((grp["plate_z"] - grp["pc150_dev_z"].add(grp["plate_z"] - grp["pc150_dev_z"])) ** 2).tolist())
+            # linear baseline: predict plate_z from linear trajectory
+            lin_dev = df_e["pc150_dev_z"].dropna()  # dev from linear = already the linear prediction error
+            lin_rmse_val = _np.sqrt((df_e["pc150_dev_z"].dropna() ** 2).mean())
+        rows.append({"k": k, "rmse": rmse, "std_dev_z": std_dev})
+        print(f"  K={k:3d}  rmse={rmse:.4f}  std_dev={std_dev:.4f}")
+
+    ksens = pd.DataFrame(rows)
+    # linear baseline RMSE from existing file
+    if _ksens_existing is not None:
+        ksens["linear_rmse"] = _ksens_existing["linear_rmse"].iloc[0]
+    ksens.to_csv(_ksens_path, index=False)
+    print("Saved knn_k_sensitivity.csv with std_dev_z")
 
 # ── 2. Neighborhood purity at K=50 ───────────────────────────────────────────
 print("\nNeighborhood purity (K=50)...")
