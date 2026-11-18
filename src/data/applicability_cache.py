@@ -24,6 +24,7 @@ xrv = pd.read_parquet(
         "pitcher_id", "distortion_tax", "selection_tax",
         "spatial_distortion_tax", "disruption_tax",
         "distortion_share", "ev_suppression", "la_realized", "la_intended",
+        "decision_cost",
     ],
 ).dropna(subset=["distortion_tax", "selection_tax"])
 
@@ -118,20 +119,20 @@ df["zone_bin"] = pd.cut(
 )
 
 zone = (
-    df.dropna(subset=["zone_bin"])
+    df.dropna(subset=["zone_bin", "decision_cost"])
     .groupby("zone_bin", observed=True)
     .agg(
-        mean_selection_tax=("selection_tax", "mean"),
+        mean_decision_cost=("decision_cost", "mean"),
         mean_disruption_tax=("disruption_tax", "mean"),
         mean_distortion_share=("distortion_share", "mean"),
         pct_in_zone=("in_zone", "mean"),
-        n=("selection_tax", "count"),
+        n=("decision_cost", "count"),
     )
     .reset_index()
 )
 zone.to_csv("data/viz_cache/val_selection_zone.csv", index=False)
 print(f"Saved val_selection_zone.csv")
-print(zone[["zone_bin", "mean_selection_tax", "n"]].to_string(index=False))
+print(zone[["zone_bin", "mean_decision_cost", "n"]].to_string(index=False))
 
 # ── 3. EV suppression and LA change by distortion share quartile ──────────────
 print("\nBuilding EV suppression cache...")
@@ -139,7 +140,8 @@ print("\nBuilding EV suppression cache...")
 df_bip = df.dropna(subset=["ev_suppression", "la_change", "distortion_share"]).copy()
 df_bip["dist_quartile"] = pd.qcut(
     df_bip["distortion_share"], q=4,
-    labels=["Q1\n(least distortion)", "Q2", "Q3", "Q4\n(most distortion)"]
+    labels=["Q1\n(least distortion)", "Q2", "Q3", "Q4\n(most distortion)"],
+    duplicates="drop",
 )
 
 ev_supp = (
