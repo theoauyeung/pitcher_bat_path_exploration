@@ -81,11 +81,12 @@ for col in RESP_COLS:
 # ── Compute metrics ───────────────────────────────────────────────────────────
 records = []
 for rc, ic, label, unit in zip(RESP_COLS, INT_COLS, RESP_LABELS, UNITS):
-    realized = test[rc].values
+    valid = test[[rc, ic, f"grand_mean_{rc}", f"batter_mean_{rc}"]].dropna()
+    realized = valid[rc].values
     for model_name, preds in [
-        ("Grand mean",        test[f"grand_mean_{rc}"].values),
-        ("Per-batter mean",   test[f"batter_mean_{rc}"].values),
-        ("LMM (this work)",   test[ic].values),
+        ("Grand mean",        valid[f"grand_mean_{rc}"].values),
+        ("Per-batter mean",   valid[f"batter_mean_{rc}"].values),
+        ("LMM (this work)",   valid[ic].values),
     ]:
         err   = realized - preds
         rmse  = np.sqrt(np.mean(err ** 2))
@@ -96,7 +97,7 @@ for rc, ic, label, unit in zip(RESP_COLS, INT_COLS, RESP_LABELS, UNITS):
             "model":      model_name,
             "rmse":       rmse,
             "mae":        mae,
-            "n":          len(realized),
+            "n":          len(valid),
         })
 
 metrics = pd.DataFrame(records)
