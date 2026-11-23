@@ -95,9 +95,10 @@ records.append({"model": "Foul classifier",   "metric": "AUC-ROC",
                 "model_val": auc_foul, "baseline_val": 0.5,
                 "baseline_name": "Random (0.5)", "n": len(d_foul)})
 
-# EV regressor
-d_ev = test.loc[test["is_bip"] == 1, EV_LA_FEATURES + ["launch_speed"]].dropna()
-ev_pred = exit_velo_model.predict(d_ev[EV_LA_FEATURES])
+# EV regressor — use whichever feature set the saved model expects
+_ev_features = exit_velo_model.get_booster().feature_names
+d_ev = test.loc[test["is_bip"] == 1, _ev_features + ["launch_speed"]].dropna()
+ev_pred = exit_velo_model.predict(d_ev[_ev_features])
 ev_actual = d_ev["launch_speed"].values
 ss_res = ((ev_actual - ev_pred) ** 2).sum()
 ss_tot = ((ev_actual - ev_actual.mean()) ** 2).sum()
@@ -112,8 +113,9 @@ records.append({"model": "Exit velo (XGB)",  "metric": "RMSE (mph)",
                 "baseline_name": "Predict mean", "n": len(d_ev)})
 
 # LA regressor
-d_la = test.loc[test["is_bip"] == 1, EV_LA_FEATURES + ["launch_angle"]].dropna()
-la_pred   = launch_angle_model.predict(d_la[EV_LA_FEATURES])
+_la_features = launch_angle_model.get_booster().feature_names
+d_la = test.loc[test["is_bip"] == 1, _la_features + ["launch_angle"]].dropna()
+la_pred   = launch_angle_model.predict(d_la[_la_features])
 la_actual = d_la["launch_angle"].values
 ss_res_la = ((la_actual - la_pred) ** 2).sum()
 ss_tot_la = ((la_actual - la_actual.mean()) ** 2).sum()
@@ -171,16 +173,16 @@ print("Saved cm_bip_calibration.csv, cm_foul_calibration.csv")
 print("\nBuilding EV/LA scatter samples...")
 rng = np.random.default_rng(42)
 
-n_samp = min(6000, len(d_ev))
-idx_ev = rng.choice(len(d_ev), size=n_samp, replace=False)
+n_samp = min(6000, len(ev_actual))
+idx_ev = rng.choice(len(ev_actual), size=n_samp, replace=False)
 ev_scatter = pd.DataFrame({
     "actual":    ev_actual[idx_ev],
     "predicted": ev_pred[idx_ev],
 })
 ev_scatter.to_csv("data/viz_cache/cm_ev_scatter.csv", index=False)
 
-n_samp_la = min(6000, len(d_la))
-idx_la = rng.choice(len(d_la), size=n_samp_la, replace=False)
+n_samp_la = min(6000, len(la_actual))
+idx_la = rng.choice(len(la_actual), size=n_samp_la, replace=False)
 la_scatter = pd.DataFrame({
     "actual":    la_actual[idx_la],
     "predicted": la_pred[idx_la],
